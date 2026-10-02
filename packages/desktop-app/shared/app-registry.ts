@@ -1,33 +1,23 @@
 import {
-  DEFAULT_APPS as SHARED_DEFAULT_APPS,
   TEMPLATE_APPS as SHARED_TEMPLATE_APPS,
   getTemplate as getSharedTemplate,
   getTemplateGatewayAppUrl as getSharedTemplateGatewayAppUrl,
   type AppConfig,
 } from "@agent-native/shared-app-config";
 
-const DESKTOP_DEFAULT_EXCLUDED_APP_IDS = new Set(["starter", "chat"]);
+import { FOGBREAK_ORIGIN } from "./fogbreak.js";
 const DESKTOP_HIDDEN_APP_IDS: ReadonlySet<string> = new Set(["dispatch"]);
 const DEFAULT_DESKTOP_TEMPLATE_GATEWAY_URL = "http://127.0.0.1:8080";
 const DESKTOP_APP_ICON_OVERRIDES: Partial<Record<string, string>> = {
   clips: "VideoPlus",
 };
 export const DESKTOP_CHAT_FIRST_DEFAULT_APP_IDS = [
-  "mail",
-  "calendar",
-  "design",
-  "clips",
+  "fogbreak",
   "content",
-  "analytics",
 ] as const;
 const DESKTOP_DEFAULT_APP_ORDER = [
   ...DESKTOP_CHAT_FIRST_DEFAULT_APP_IDS,
-  ...SHARED_DEFAULT_APPS.map((app) => app.id).filter(
-    (id) =>
-      !DESKTOP_CHAT_FIRST_DEFAULT_APP_IDS.includes(
-        id as (typeof DESKTOP_CHAT_FIRST_DEFAULT_APP_IDS)[number],
-      ),
-  ),
+  "dispatch",
 ];
 const DESKTOP_DEFAULT_APP_ORDER_INDEX = new Map(
   DESKTOP_DEFAULT_APP_ORDER.map((id, index) => [id, index]),
@@ -51,11 +41,44 @@ export function sortDesktopApps<T extends Pick<AppConfig, "id">>(
   });
 }
 
-export const DESKTOP_DEFAULT_APPS = sortDesktopApps(
-  SHARED_DEFAULT_APPS.filter(
-    (app) => !DESKTOP_DEFAULT_EXCLUDED_APP_IDS.has(app.id),
-  ).map(applyDesktopAppOverrides),
-);
+export const DESKTOP_DEFAULT_APPS: AppConfig[] = [
+  {
+    id: "fogbreak",
+    name: "Fogbreak",
+    icon: "LayoutBoard",
+    description: "",
+    url: `${FOGBREAK_ORIGIN}/`,
+    devPort: 0,
+    isBuiltIn: true,
+    enabled: true,
+    mode: "prod",
+    workspaceSso: false,
+  },
+  {
+    id: "content",
+    name: "Content",
+    icon: "FileText",
+    description: "",
+    url: `${FOGBREAK_ORIGIN}/content`,
+    devPort: 0,
+    isBuiltIn: true,
+    enabled: true,
+    mode: "prod",
+    workspaceSso: false,
+  },
+  {
+    id: "dispatch",
+    name: "Dispatch",
+    icon: "LayoutBoard",
+    description: "",
+    url: `${FOGBREAK_ORIGIN}/dispatch`,
+    devPort: 0,
+    isBuiltIn: true,
+    enabled: true,
+    mode: "prod",
+    workspaceSso: false,
+  },
+];
 
 export function isDesktopAppVisible(app: Pick<AppConfig, "id">): boolean {
   return !DESKTOP_HIDDEN_APP_IDS.has(app.id);

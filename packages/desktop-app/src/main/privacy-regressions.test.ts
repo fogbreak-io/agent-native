@@ -522,7 +522,7 @@ describe("desktop passive-access regressions", () => {
         new URL("../../electron-builder.yml", import.meta.url),
         "utf8",
       ),
-    ).toContain("- agentnative");
+    ).toContain("- fogbreak");
     expect(
       readFileSync(
         new URL(

@@ -106,10 +106,10 @@ describe("initializeDesktopStartup", () => {
     initializeDesktopStartup(dependencies);
 
     expect(dependencies.createDirectory).toHaveBeenCalledWith(
-      "/application-support/Agent Native SSO Canary", // agent-native-brand-ok: preserve the legacy Electron profile directory.
+      "/application-support/Fogbreak SSO Canary", // agent-native-brand-ok: preserve the legacy Electron profile directory.
     );
     expect(dependencies.setUserDataPath).toHaveBeenCalledWith(
-      "/application-support/Agent Native SSO Canary", // agent-native-brand-ok: preserve the legacy Electron profile directory.
+      "/application-support/Fogbreak SSO Canary", // agent-native-brand-ok: preserve the legacy Electron profile directory.
     );
     expect(events).toEqual([
       "create-directory",
@@ -145,10 +145,10 @@ describe("initializeDesktopStartup", () => {
     initializeDesktopStartup(dependencies);
 
     expect(dependencies.createDirectory).toHaveBeenCalledWith(
-      "/application-support/Agent-Native",
+      "/application-support/Fogbreak",
     );
     expect(dependencies.setUserDataPath).toHaveBeenCalledWith(
-      "/application-support/Agent-Native",
+      "/application-support/Fogbreak",
     );
     expect(events).toEqual([
       "create-directory",
@@ -158,7 +158,7 @@ describe("initializeDesktopStartup", () => {
     ]);
   });
 
-  it("uses the legacy stable profile directory when it already exists", () => {
+  it("does not migrate a generic installed profile", () => {
     const { dependencies } = createDependencies({
       version: "0.1.150",
       pathExists: vi.fn(
@@ -170,11 +170,11 @@ describe("initializeDesktopStartup", () => {
     initializeDesktopStartup(dependencies);
 
     expect(dependencies.setUserDataPath).toHaveBeenCalledWith(
-      "/application-support/Agent Native", // agent-native-brand-ok: preserve the legacy Electron profile directory.
+      "/application-support/Fogbreak",
     );
   });
 
-  it("reuses the legacy stable profile for packaged Nightly", () => {
+  it("isolates packaged Fogbreak Nightly even with a generic legacy profile", () => {
     const { dependencies, events } = createDependencies({
       version: "0.1.150-nightly.296",
       defaultUserDataPath: "/application-support/Agent-Native Nightly",
@@ -187,10 +187,10 @@ describe("initializeDesktopStartup", () => {
     initializeDesktopStartup(dependencies);
 
     expect(dependencies.createDirectory).toHaveBeenCalledWith(
-      "/application-support/Agent Native", // agent-native-brand-ok: preserve the legacy Electron profile directory.
+      "/application-support/Fogbreak Nightly",
     );
     expect(dependencies.setUserDataPath).toHaveBeenCalledWith(
-      "/application-support/Agent Native", // agent-native-brand-ok: preserve the legacy Electron profile directory.
+      "/application-support/Fogbreak Nightly",
     );
     expect(events).toEqual([
       "create-directory",
@@ -210,7 +210,7 @@ describe("initializeDesktopStartup", () => {
     initializeDesktopStartup(dependencies);
 
     expect(dependencies.setUserDataPath).toHaveBeenCalledWith(
-      "/application-support/Agent-Native Nightly",
+      "/application-support/Fogbreak Nightly",
     );
   });
 

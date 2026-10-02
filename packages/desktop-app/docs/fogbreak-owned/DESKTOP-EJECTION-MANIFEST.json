@@ -1,0 +1,83 @@
+{
+  "kind": "desktop-source-composition",
+  "upstream": {
+    "repository": "BuilderIO/agent-native",
+    "release": "0.1.273",
+    "commit": "90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd"
+  },
+  "handoff_base": "31d29c8eeaf663b042bf38829c8f2042bac4e09f",
+  "source_owner": "Fogbreak desktop integration",
+  "scope": "packages/desktop-app only",
+  "cli_ejection": false,
+  "configuration_gap": "Upstream documents a registry and desktop build, but supplies no full-website/own-brand desktop preset or desktop-shell eject recipe. This is the explicitly authorized bounded fork of desktop application source, not an exported Core/Toolkit ejection unit.",
+  "owned_changes": [
+    {
+      "area": "distribution",
+      "files": [
+        "package.json",
+        "electron-builder.yml",
+        "scripts/build-fogbreak-assets.ts"
+      ],
+      "reason": "Fogbreak product/app ID, arm64 Mac target, own icon route and signing prerequisites, no Builder publisher"
+    },
+    {
+      "area": "registry and session",
+      "files": [
+        "shared/app-registry.ts",
+        "shared/fogbreak.ts",
+        "src/main/index.ts"
+      ],
+      "reason": "Owned hosted root and real Content entry share a persistent session with official workspace discovery; active-view folder checks remain unchanged"
+    },
+    {
+      "area": "hosted composition",
+      "files": [
+        "src/renderer/App.tsx",
+        "src/renderer/components/AppWebview.tsx",
+        "src/renderer/shell.css",
+        "src/renderer/index.html"
+      ],
+      "reason": "Existing AppWebview replaces the generic provider shell; website retains its theme and chat UI via a narrow optional presentation-sync opt-out"
+    },
+    {
+      "area": "isolation",
+      "files": [
+        "src/main/app-store.ts",
+        "shared/release-channel.ts",
+        "src/main/ipc/update-policy.ts",
+        "src/main/ipc/updates.ts"
+      ],
+      "reason": "SSO disabled by default, separate profile/workspace root/protocol, no configured update feed"
+    },
+    {
+      "area": "packaged dependency closure",
+      "files": [
+        "electron.vite.config.ts",
+        "scripts/check-fogbreak-closure.ts",
+        "electron.vite.code-agent-runner.config.ts"
+      ],
+      "reason": "Bundle direct main/preload dependencies excluded from the archive, including Core/shared; package complete frozen AJV runtime and dynamic undici closure; preserve native node-pty packaging"
+    }
+  ],
+  "protected_contracts": [
+    "Hosted Fogbreak auth, actions, data and rendering engines remain server/feature owned",
+    "DesktopIdentityGate implementation and supported SSO-off behavior retained",
+    "No new filesystem, token exchange, backend, provider or privileged web IPC surface",
+    "Content requires a genuine active Content webview, matching sender, trusted origin and Native chooser grant",
+    "Existing sandbox, context isolation, no node integration, symlink/traversal/size limits retained",
+    "Existing upstream package and dependency versions and frozen lockfile retained"
+  ],
+  "open_gaps": [
+    "Approved Fogbreak icon not supplied; asset build fails closed rather than reusing upstream branding",
+    "Root SPA navigation to /content is not a Native Content activation. Embedded pages are intentionally forbidden from privileged native deep links. File > Content / CmdOrCtrl+2 uses the existing trusted-shell open path; Main/public-seam owner must bind an approved website transition if required.",
+    "Website-owned OAuth/deep-link callback compatibility and authenticated logout/reopen require runtime acceptance",
+    "Official release notice inconsistency, owner signing/notarization and allocated macOS build route remain unresolved",
+    "World/Golf/Games all-feature target-machine GPU/CPU/memory/audio/input/save/reopen/return acceptance remains unexecuted"
+  ],
+  "packaging_optional_probe": {
+    "specifier": "virtual:agents-bundle",
+    "source": "packages/core/src/server/agents-bundle.ts: loadAgentsBundle",
+    "classification": "optional Vite-only probe caught before existing filesystem fallback",
+    "handling": "No shim or Core change. Closure checker permits only this named import inside the upstream guarded function and reports it separately."
+  }
+}

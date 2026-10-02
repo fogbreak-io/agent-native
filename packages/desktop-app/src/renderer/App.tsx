@@ -1,503 +1,265 @@
 import { Toaster as ToastToaster } from "@agent-native/toolkit/ui/toaster";
 import {
   DESKTOP_DEFAULT_APPS,
-  getDesktopVisibleApps,
-  isDesktopAppVisible,
+  toAppDefinition,
   type AppConfig,
 } from "@shared/app-registry";
-import {
-  CODE_AGENTS_SURFACE_ID,
-  MIGRATION_APP_ID,
-  getCodeAgentGoal,
-} from "@shared/code-agents";
 import { isDesktopSettingsShortcut } from "@shared/desktop-shortcuts";
+import {
+  FOGBREAK_APP_ID,
+  FOGBREAK_SESSION_PARTITION,
+  resolveFogbreakOpenUrl,
+} from "@shared/fogbreak";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 
 import type {
-  DesktopPrepareLocalCodeChangeResult,
   DesktopIdentityStatus,
   DesktopWorkspaceAppListResult,
 } from "../../shared/ipc-channels.js";
-import AppSettings, { AddAppDialog } from "./components/AppSettings.js";
-import {
-  rememberDesktopEnvironmentLane,
+import AppSettings from "./components/AppSettings.js";
+import AppWebview, {
   rememberDesktopIdentityStatus,
 } from "./components/AppWebview.js";
-import CodeAgentsHub from "./components/CodeAgentsHub.js";
 import DesktopIdentityGate from "./components/DesktopIdentityGate.js";
 import WindowControls, {
   CollapsedMacWindowControls,
 } from "./components/WindowControls.js";
+import { useRendererTheme } from "./lib/theme.js";
 
-function safeDesktopOpenPath(path: string | undefined): string | undefined {
-  if (!path) return undefined;
-  const trimmed = path.trim();
-  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return undefined;
-  if (trimmed.startsWith("/\\")) return undefined;
-  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return undefined;
-  if (/^\/[a-z][a-z0-9+.-]*:/i.test(trimmed)) return undefined;
-  return trimmed;
-}
-
+// The hosted website owns navigation, auth, actions and UI. These slots only
+// preserve Native's registered app identity and session across explicit opens.
 export default function App() {
+  const theme = useRendererTheme();
   const [apps, setApps] = useState<AppConfig[]>([]);
-  const [workspaceAppList, setWorkspaceAppList] =
-    useState<DesktopWorkspaceAppListResult>();
-  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string>();
+  const [activeAppId, setActiveAppId] = useState(FOGBREAK_APP_ID);
+  const [views, setViews] = useState<
+    Record<string, { url: string; nonce: number }>
+  >({
+    [FOGBREAK_APP_ID]: { url: DESKTOP_DEFAULT_APPS[0].url, nonce: 0 },
+  });
   const [desktopIdentityStatus, setDesktopIdentityStatus] = useState<
     DesktopIdentityStatus | "checking"
-  >(() => (window.electronAPI?.identity ? "checking" : "idle"));
-  const childIdentityFailureRef = useRef(false);
+  >("idle");
+  const [workspaceAppList, setWorkspaceAppList] =
+    useState<DesktopWorkspaceAppListResult>();
+  const inventoryGeneration = useRef(0);
+  const openNonce = useRef(0);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState("general");
-  const [showAddApp, setShowAddApp] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const runtimeStatusByAppRef = useRef(
-    new Map<string, DesktopAppRuntimeStatus["state"]>(),
-  );
-  const [activeChatFirstAppId, setActiveChatFirstAppId] = useState("");
-  const [codeAgentsOpenRequest, setCodeAgentsOpenRequest] = useState<{
-    goalId?: string;
-    runId?: string;
-    nonce: number;
-  }>();
-  const [chatFirstPreviewRequest, setChatFirstPreviewRequest] = useState<{
-    appId: string;
-    nonce: number;
-  }>();
-  const [chatFirstPreviewStatus, setChatFirstPreviewStatus] = useState<{
-    appId: string;
-    state: "starting" | "ready" | "error";
-    message?: string;
-  }>();
-  const [chatFirstAppOpenRequest, setChatFirstAppOpenRequest] = useState<{
-    appId: string;
-    path?: string;
-    nonce: number;
-    focusNonce?: number;
-  }>();
-  const [pendingDesktopOpenRequest, setPendingDesktopOpenRequest] =
+  const [pendingOpenRequest, setPendingOpenRequest] =
     useState<DesktopOpenRequest | null>(null);
-  const [
-    pendingDesktopShortcutActivation,
-    setPendingDesktopShortcutActivation,
-  ] = useState<DesktopShortcutActivationRequest | null>(null);
+  const [pendingShortcut, setPendingShortcut] =
+    useState<DesktopShortcutActivationRequest | null>(null);
 
-  const refreshWorkspaceAppList = useCallback(async () => {
-    const loader = window.electronAPI?.appConfig
-      ? () => window.electronAPI!.appConfig!.loadWorkspace!()
-      : undefined;
-    if (!loader) {
-      setWorkspaceAppList(undefined);
-      return;
-    }
+  const refreshWorkspaceApps = useCallback(async () => {
+    const loader = window.electronAPI?.appConfig?.loadWorkspace;
+    if (!loader) return;
+    const generation = ++inventoryGeneration.current;
     try {
       const result = await loader();
-      if (!result.unavailable) setWorkspaceAppList(result);
+      if (generation === inventoryGeneration.current)
+        setWorkspaceAppList(result);
     } catch (error) {
-      console.debug("[desktop] workspace app inventory refresh unavailable", {
-        reason: error instanceof Error ? error.message : "unknown error",
-      });
-    }
-  }, []);
-
-  const refreshEnvironmentLane = useCallback(async () => {
-    const getLane = window.electronAPI?.identity
-      ? () => window.electronAPI!.identity!.getEnvironmentLane()
-      : undefined;
-    if (!getLane) return;
-    try {
-      const state = await getLane();
-      if (rememberDesktopEnvironmentLane(state.lane)) {
-        setRefreshKey((current) => current + 1);
-      }
-    } catch (error) {
-      // coercion-ok: the lane keeps its last known value, which is the same
-      // origin every webview is already pointed at. A failed read must not
-      // move a signed-in user between lanes.
-      console.debug("[desktop-environment] lane read failed", {
-        reason: error instanceof Error ? error.message : "unknown error",
-      });
+      if (generation === inventoryGeneration.current)
+        setWorkspaceAppList({ enabled: true, apps: [], unavailable: true });
+      console.warn("[fogbreak] workspace inventory unavailable", error);
     }
   }, []);
 
   useEffect(() => {
-    async function load() {
-      const loaded = window.electronAPI?.appConfig
-        ? await window.electronAPI.appConfig.load()
-        : DESKTOP_DEFAULT_APPS;
-      await refreshEnvironmentLane();
-      setApps(loaded);
-      setLoading(false);
-    }
-    void load();
-  }, [refreshEnvironmentLane]);
-
-  useEffect(() => {
-    void refreshWorkspaceAppList();
-    const identity = window.electronAPI?.identity;
-    if (!identity) {
-      setDesktopIdentityStatus("idle");
-      return;
-    }
     let mounted = true;
-    const handleStatusChange = (status: DesktopIdentityStatus) => {
-      if (!mounted) return;
-      childIdentityFailureRef.current = false;
-      setDesktopIdentityStatus(status);
-      rememberDesktopIdentityStatus(status);
-      void refreshWorkspaceAppList();
-      void refreshEnvironmentLane();
+    const load = window.electronAPI?.appConfig?.load;
+    void (load ? load() : Promise.resolve(DESKTOP_DEFAULT_APPS))
+      .then((loaded) => {
+        if (mounted) setApps(loaded);
+      })
+      .catch((error) => {
+        if (mounted)
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load desktop settings",
+          );
+      });
+    return () => {
+      mounted = false;
     };
-    const unsubscribe = identity.onStatusChange(handleStatusChange);
+  }, []);
+
+  useEffect(() => {
+    void refreshWorkspaceApps();
+    const identity = window.electronAPI?.identity;
+    if (!identity) return;
+    let mounted = true;
+    const onStatus = (status: DesktopIdentityStatus) => {
+      if (!mounted) return;
+      rememberDesktopIdentityStatus(status);
+      setDesktopIdentityStatus(status);
+    };
+    const unsubscribe = identity.onStatusChange(onStatus);
     void identity
       .getStatus()
-      .then(handleStatusChange)
-      .catch(() => {
-        if (mounted) setDesktopIdentityStatus("failed");
+      .then(onStatus)
+      .catch((error) => {
+        // A failed preference/IPC read is not a request for vendor authentication.
+        if (mounted)
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load desktop identity settings",
+          );
       });
     return () => {
       mounted = false;
       unsubscribe();
     };
-  }, [refreshWorkspaceAppList, refreshEnvironmentLane]);
+  }, [refreshWorkspaceApps]);
 
-  const visibleEnabledApps = getDesktopVisibleApps(
-    apps.filter((app) => app.enabled),
-  );
-
-  const handleAppsChanged = useCallback((nextApps: AppConfig[]) => {
-    setApps(nextApps);
-  }, []);
-
-  const handleOpenSettings = useCallback((tab?: string) => {
-    setSettingsTab(tab ?? "general");
-    setShowSettings(true);
-  }, []);
-
-  useEffect(() => {
-    const onKeydown = window.electronAPI?.shortcuts
-      ? (
-          callback: Parameters<
-            typeof window.electronAPI.shortcuts.onKeydown
-          >[0],
-        ) => window.electronAPI!.shortcuts!.onKeydown(callback)
-      : undefined;
-    if (!onKeydown) return;
-    return onKeydown((input) => {
-      if (
-        !isDesktopSettingsShortcut({
-          key: input.key,
-          code: input.code,
-          shift: input.shiftKey,
-          alt: input.altKey,
-        })
-      ) {
-        return;
-      }
-      handleOpenSettings();
-    });
-  }, [handleOpenSettings]);
-
-  const handleChatFirstAppSelectionChange = useCallback((appId?: string) => {
-    setActiveChatFirstAppId(appId ?? "");
-    if (appId) window.electronAPI?.setActiveApp?.(appId);
-  }, []);
-
-  const handleChatFirstAppCreated = useCallback(
-    (result: DesktopCreateAppResult) => {
-      if (!result.app) return;
-      setApps(result.apps);
-      setChatFirstPreviewRequest({ appId: result.app.id, nonce: Date.now() });
-      setChatFirstPreviewStatus({
-        appId: result.app.id,
-        state: "starting",
-        message: "The coding agent is preparing the local preview.",
-      });
-      setRefreshKey((current) => current + 1);
+  const handleDesktopOpenRequest = useCallback(
+    (request: DesktopOpenRequest): boolean => {
+      const appId = request.app ?? FOGBREAK_APP_ID;
+      const target = apps.find(
+        (candidate) => candidate.id === appId && candidate.enabled,
+      );
+      if (!target || appId === "dispatch") return false;
+      const url = resolveFogbreakOpenUrl(target, request.path);
+      if (!url) return false;
+      const nonce = ++openNonce.current;
+      setViews((current) => ({
+        ...current,
+        [appId]:
+          !request.path && current[appId] ? current[appId] : { url, nonce },
+      }));
+      setActiveAppId(appId);
+      window.electronAPI?.setActiveApp?.(appId);
       setShowSettings(false);
-      setShowAddApp(false);
-      if (result.run) {
-        setCodeAgentsOpenRequest({
-          goalId: result.run.goalId,
-          runId: result.run.id,
-          nonce: Date.now(),
-        });
-      }
-      toast(`Building ${result.app.name}`, {
-        description: "New chat started. Preview opens on the right.",
-        duration: 5000,
-      });
-    },
-    [],
-  );
-
-  const handleLocalCodeChangeStarted = useCallback(
-    (result: DesktopPrepareLocalCodeChangeResult) => {
-      if (!result.app) return;
-      setApps(result.apps);
-      setRefreshKey((current) => current + 1);
-      toast(`Preparing ${result.app.name} locally`, {
-        description:
-          "The production app stays unchanged. Desktop will open the local preview when it is ready.",
-        duration: 5000,
-      });
-    },
-    [],
-  );
-
-  const handleAddApp = useCallback(async (app: AppConfig) => {
-    if (window.electronAPI?.appConfig) {
-      setApps(await window.electronAPI.appConfig.add(app));
-    } else {
-      setApps((current) => [...current, app]);
-    }
-    setShowAddApp(false);
-  }, []);
-
-  const handlePromptAppCreated = useCallback(
-    (result: DesktopCreateAppResult) => {
-      handleChatFirstAppCreated(result);
-    },
-    [handleChatFirstAppCreated],
-  );
-
-  const handleAppRemoval = useCallback(
-    async (appId: string) => {
-      const api = window.electronAPI?.appConfig;
-      const app = apps.find((candidate) => candidate.id === appId);
-      if (!api || !app) return;
-
-      try {
-        const updated = app.isBuiltIn
-          ? await api.update(appId, { enabled: false })
-          : await api.remove(appId);
-        setApps(updated);
-        setActiveChatFirstAppId((current) =>
-          current === appId ? "" : current,
-        );
-        setChatFirstPreviewRequest((current) =>
-          current?.appId === appId ? undefined : current,
-        );
-        setChatFirstPreviewStatus((current) =>
-          current?.appId === appId ? undefined : current,
-        );
-      } catch {
-        toast.error(`Couldn't remove ${app.name}`, {
-          description: "Please try again.",
-        });
-      }
+      return true;
     },
     [apps],
   );
 
-  const handleDesktopOpenRequest = useCallback(
-    (request: DesktopOpenRequest): boolean => {
-      const goal = getCodeAgentGoal(request.goalId);
-      if (
-        goal ||
-        request.app === MIGRATION_APP_ID ||
-        request.app === CODE_AGENTS_SURFACE_ID
-      ) {
-        setCodeAgentsOpenRequest({
-          goalId:
-            goal?.id ??
-            (request.app === MIGRATION_APP_ID ? "migrate" : undefined),
-          runId: request.runId,
-          nonce: Date.now(),
-        });
-        setShowSettings(false);
-        setShowAddApp(false);
-        return true;
-      }
-
-      const appId = request.app?.trim();
-      if (!appId) return true;
-      const targetApp = visibleEnabledApps.find((app) => app.id === appId);
-      if (!targetApp) {
-        const configuredApp = apps.find((app) => app.id === appId);
-        if (configuredApp && !isDesktopAppVisible(configuredApp)) return false;
-        return false;
-      }
-
-      const path = safeDesktopOpenPath(request.path);
-      const nonce = Date.now();
-      setChatFirstAppOpenRequest({
-        appId,
-        nonce,
-        ...(path ? { path } : {}),
-        ...("requestId" in request ? { focusNonce: nonce } : {}),
-      });
-      setShowSettings(false);
-      setShowAddApp(false);
-      return true;
-    },
-    [apps, loading, visibleEnabledApps],
-  );
+  useEffect(() => {
+    window.electronAPI?.setActiveApp?.(activeAppId);
+  }, [activeAppId]);
 
   useEffect(() => {
     const bridge = {
-      getActiveAppId: () => activeChatFirstAppId || CODE_AGENTS_SURFACE_ID,
+      getActiveAppId: () => activeAppId,
       activate: (
         request: DesktopShortcutActivationRequest,
       ): DesktopShortcutActivationResult => {
         const handled = handleDesktopOpenRequest(request);
-        const appId = handled ? request.app : undefined;
-        if (appId) window.electronAPI?.setActiveApp?.(appId);
         return {
           handled,
-          appId,
-          activeAppId:
-            (appId ?? activeChatFirstAppId) || CODE_AGENTS_SURFACE_ID,
+          ...(handled ? { appId: request.app } : {}),
+          activeAppId: handled ? request.app : activeAppId,
         };
       },
     };
     window.__agentNativeDesktopShortcutBridge = bridge;
     return () => {
-      if (window.__agentNativeDesktopShortcutBridge === bridge) {
+      if (window.__agentNativeDesktopShortcutBridge === bridge)
         delete window.__agentNativeDesktopShortcutBridge;
-      }
     };
-  }, [activeChatFirstAppId, handleDesktopOpenRequest]);
+  }, [activeAppId, handleDesktopOpenRequest]);
+
+  useEffect(
+    () =>
+      window.electronAPI?.codeAgents?.onOpenRequest?.(setPendingOpenRequest),
+    [],
+  );
+  useEffect(
+    () => window.electronAPI?.shortcuts?.onActivate?.(setPendingShortcut),
+    [],
+  );
+  useEffect(
+    () =>
+      window.electronAPI?.shortcuts?.onCloseTab?.(() => {
+        if (activeAppId !== FOGBREAK_APP_ID)
+          handleDesktopOpenRequest({ app: FOGBREAK_APP_ID });
+        else window.electronAPI?.windowControls.close();
+      }),
+    [activeAppId, handleDesktopOpenRequest],
+  );
 
   useEffect(() => {
-    window.electronAPI?.setActiveApp?.(
-      activeChatFirstAppId || CODE_AGENTS_SURFACE_ID,
-    );
-  }, [activeChatFirstAppId]);
+    if (!pendingOpenRequest || !apps.length) return;
+    if (!handleDesktopOpenRequest(pendingOpenRequest))
+      toast.error("This destination is unavailable in Fogbreak");
+    setPendingOpenRequest(null);
+  }, [apps, pendingOpenRequest, handleDesktopOpenRequest]);
 
   useEffect(() => {
-    if (!window.electronAPI?.codeAgents?.onOpenRequest) return;
-    return window.electronAPI.codeAgents.onOpenRequest((request) => {
-      setPendingDesktopOpenRequest(request);
-    });
-  }, []);
-
-  useEffect(() => {
-    const shortcutApi = window.electronAPI?.shortcuts;
-    if (!shortcutApi?.onActivate) return;
-    return shortcutApi.onActivate((request) => {
-      setPendingDesktopShortcutActivation(request);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!pendingDesktopOpenRequest) return;
-    if (handleDesktopOpenRequest(pendingDesktopOpenRequest)) {
-      setPendingDesktopOpenRequest(null);
+    if (!pendingShortcut || !apps.length) return;
+    if (handleDesktopOpenRequest(pendingShortcut)) {
+      window.electronAPI?.shortcuts?.ackActivation(
+        pendingShortcut.requestId,
+        pendingShortcut.app,
+      );
     }
-  }, [handleDesktopOpenRequest, pendingDesktopOpenRequest]);
+    setPendingShortcut(null);
+  }, [apps, pendingShortcut, handleDesktopOpenRequest]);
 
-  useEffect(() => {
-    if (!pendingDesktopShortcutActivation) return;
-    const handled = handleDesktopOpenRequest(pendingDesktopShortcutActivation);
-    if (!handled) return;
-    const appId = pendingDesktopShortcutActivation.app;
-    if (appId) window.electronAPI?.setActiveApp?.(appId);
-    window.electronAPI?.shortcuts?.ackActivation(
-      pendingDesktopShortcutActivation.requestId,
-      appId,
-    );
-    setPendingDesktopShortcutActivation(null);
-  }, [handleDesktopOpenRequest, pendingDesktopShortcutActivation]);
-
-  useEffect(() => {
-    const appConfigApi = window.electronAPI?.appConfig;
-    if (!appConfigApi?.onRuntimeStatus) return;
-    return appConfigApi.onRuntimeStatus((status) => {
-      const isPreview = status.appId === chatFirstPreviewRequest?.appId;
-      const previousState = runtimeStatusByAppRef.current.get(status.appId);
-      runtimeStatusByAppRef.current.set(status.appId, status.state);
-      if (
-        status.state === "running" &&
-        previousState !== "running" &&
-        (status.appId === activeChatFirstAppId || isPreview)
-      ) {
-        setRefreshKey((key) => key + 1);
-      }
-      if (!isPreview) return;
-      if (status.state === "waiting" || status.state === "starting") {
-        setChatFirstPreviewStatus({
-          appId: status.appId,
-          state: "starting",
-          ...(status.message ? { message: status.message } : {}),
-        });
-        return;
-      }
-      if (status.state === "running") {
-        setChatFirstPreviewStatus({
-          appId: status.appId,
-          state: "ready",
-          ...(status.message ? { message: status.message } : {}),
-        });
-        return;
-      }
-      setChatFirstPreviewStatus({
-        appId: status.appId,
-        state: "error",
-        message:
-          status.message ?? "The local preview stopped before it was ready.",
-      });
-    });
-  }, [activeChatFirstAppId, chatFirstPreviewRequest?.appId]);
-
-  if (loading) {
-    return (
-      <div
-        className="shell"
-        style={{ alignItems: "center", justifyContent: "center" }}
-      >
-        <p style={{ color: "#666" }}>Loading...</p>
-      </div>
-    );
-  }
+  useEffect(
+    () =>
+      window.electronAPI?.shortcuts?.onKeydown?.((input) => {
+        if (
+          isDesktopSettingsShortcut({
+            key: input.key,
+            code: input.code,
+            shift: input.shiftKey,
+            alt: input.altKey,
+          })
+        ) {
+          setSettingsTab("general");
+          setShowSettings(true);
+        }
+      }),
+    [],
+  );
 
   return (
-    <div className="shell">
-      <WindowControls className="win-controls desktop-chat-first-window-controls" />
-      {window.electronAPI?.platform === "darwin" ? (
-        <CollapsedMacWindowControls className="desktop-chat-first-mac-window-controls" />
+    <div className="shell fogbreak-shell">
+      <div className="fogbreak-titlebar" aria-label="Fogbreak">
+        <WindowControls className="win-controls desktop-chat-first-window-controls" />
+        {window.electronAPI?.platform === "darwin" ? (
+          <CollapsedMacWindowControls className="desktop-chat-first-mac-window-controls" />
+        ) : null}
+      </div>
+      {loadError ? <div role="alert">{loadError}</div> : null}
+      {workspaceAppList?.unavailable ? (
+        <div className="fogbreak-inventory-status" role="status">
+          Workspace app inventory is unavailable
+        </div>
       ) : null}
       <div className="shell-body">
         <div className="content-area content-area--chat-first">
-          <div className="code-agents-shell-surface">
-            <CodeAgentsHub
-              apps={apps}
-              workspaceAppList={workspaceAppList}
-              isActive
-              openRequest={codeAgentsOpenRequest}
-              chatFirstAppOpenRequest={chatFirstAppOpenRequest}
-              chatFirstPreviewRequest={chatFirstPreviewRequest}
-              chatFirstPreviewStatus={chatFirstPreviewStatus?.state}
-              chatFirstPreviewStatusMessage={chatFirstPreviewStatus?.message}
-              refreshKey={refreshKey}
-              onOpenSettings={handleOpenSettings}
-              onCreateApp={() => setShowAddApp(true)}
-              onChatFirstAppCreated={handleChatFirstAppCreated}
-              onLocalCodeChangeStarted={handleLocalCodeChangeStarted}
-              onChatFirstAppRemove={(app) => {
-                void handleAppRemoval(app.id);
-              }}
-              onChatFirstAppSelectionChange={handleChatFirstAppSelectionChange}
-              onDesktopIdentityStatusChange={(status) => {
-                if (status === "failed" || status === "sign-in-required") {
-                  childIdentityFailureRef.current = true;
-                  setDesktopIdentityStatus(status);
-                } else if (
-                  status === "signed-in" &&
-                  childIdentityFailureRef.current
-                ) {
-                  childIdentityFailureRef.current = false;
-                  rememberDesktopIdentityStatus("signed-in");
-                  setDesktopIdentityStatus("signed-in");
-                }
-              }}
-            />
-          </div>
+          {apps
+            .filter((app) => app.enabled && views[app.id])
+            .map((app) => (
+              <AppWebview
+                key={app.id}
+                app={toAppDefinition(app)}
+                appConfig={app}
+                sourceUrl={views[app.id].url}
+                urlOpenNonce={views[app.id].nonce}
+                partitionKey={FOGBREAK_SESSION_PARTITION}
+                isActive={activeAppId === app.id && !showSettings}
+                surfaceHidden={showSettings}
+                theme={theme}
+                syncTheme={false}
+                syncAppChatSidebar={false}
+                refreshKey={refreshKey}
+                onAuthStateChange={() => void refreshWorkspaceApps()}
+                onAppsChanged={setApps}
+              />
+            ))}
         </div>
         <DesktopIdentityGate
-          appName="Agent-Native Desktop"
+          appName="Fogbreak"
           status={desktopIdentityStatus}
           onSignIn={() => window.electronAPI?.identity?.signIn() ?? false}
           onAuthenticate={(request) =>
@@ -516,33 +278,18 @@ export default function App() {
           }
         />
       </div>
-
       {showSettings ? (
         <AppSettings
           key={settingsTab}
           apps={apps}
           initialTab={settingsTab}
-          onClose={() => {
-            setShowSettings(false);
-            setSettingsTab("general");
-          }}
-          onAppsChanged={handleAppsChanged}
-          onCodeAgentProvidersChanged={() => setRefreshKey((n) => n + 1)}
-          onAddAppClick={() => {
-            setShowSettings(false);
-            setShowAddApp(true);
-          }}
+          onClose={() => setShowSettings(false)}
+          onAppsChanged={setApps}
+          onCodeAgentProvidersChanged={() =>
+            setRefreshKey((current) => current + 1)
+          }
         />
       ) : null}
-
-      {showAddApp ? (
-        <AddAppDialog
-          onSave={handleAddApp}
-          onCreated={handlePromptAppCreated}
-          onCancel={() => setShowAddApp(false)}
-        />
-      ) : null}
-
       <Toaster
         theme="system"
         position="bottom-center"

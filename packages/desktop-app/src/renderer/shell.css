@@ -4141,3 +4141,14 @@ body {
     border-left: 0;
   }
 }
+
+.fogbreak-titlebar {
+  flex: 0 0 var(--window-titlebar-height);
+  -webkit-app-region: drag;
+}
+
+.fogbreak-inventory-status {
+  padding: 4px 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}

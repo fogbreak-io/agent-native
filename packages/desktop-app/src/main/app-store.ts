@@ -488,7 +488,7 @@ export function saveRemoteConnectorSettings(
 }
 
 export function getDefaultDesktopAppsRoot(): string {
-  return path.join(app.getPath("home"), ".agent-native", "workspaces");
+  return path.join(app.getPath("home"), ".fogbreak", "workspaces");
 }
 
 export function loadDesktopAppPreferences(): DesktopAppPreferences {
@@ -496,7 +496,7 @@ export function loadDesktopAppPreferences(): DesktopAppPreferences {
     appsRoot: getDefaultDesktopAppsRoot(),
     managedAppIds: [],
     appOrder: [],
-    desktopSsoEnabled: true,
+    desktopSsoEnabled: false,
     desktopEnvironmentLane: "auto",
   };
   try {

@@ -1,5 +1,4 @@
 import { IPC, type UpdateStatus } from "@shared/ipc-channels";
-import { DESKTOP_RELEASE_CHANNEL } from "@shared/release-channel";
 import { app, BrowserWindow, ipcMain, Notification } from "electron";
 import { autoUpdater } from "electron-updater";
 
@@ -18,15 +17,8 @@ const UPDATE_SUPPORT = resolveDesktopUpdateSupport(
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const UPDATE_FOCUS_CHECK_MIN_INTERVAL_MS = 15 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 60_000;
-const DEFAULT_DESKTOP_UPDATE_FEED_URL =
-  "https://www.agent-native.com/api/desktop-updates";
-const DESKTOP_UPDATE_FEED_URL = [
-  (
-    process.env.AGENT_NATIVE_DESKTOP_UPDATE_FEED_URL ||
-    DEFAULT_DESKTOP_UPDATE_FEED_URL
-  ).replace(/\/+$/, ""),
-  ...(DESKTOP_RELEASE_CHANNEL === "nightly" ? ["nightly"] : []),
-].join("/");
+// The owned publisher is a release prerequisite; no vendor or inherited feed.
+const DESKTOP_UPDATE_FEED_URL = "";
 
 let currentUpdateStatus: UpdateStatus = !UPDATE_SUPPORT.supported
   ? { state: "unsupported", reason: UPDATE_SUPPORT.reason }

@@ -1,0 +1,121 @@
+{
+  "status": "source_implemented_linux_build_verified_mac_and_target_acceptance_pending",
+  "observed_at_utc": "2026-10-02T23:04:35Z",
+  "host": "24d6bf0c9abd",
+  "repository": "fogbreak-io/agent-native",
+  "branch": "fogbreak/desktop-native-273",
+  "base_commit": "31d29c8eeaf663b042bf38829c8f2042bac4e09f",
+  "upstream_commit": "90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd",
+  "scope": "packages/desktop-app only",
+  "source_owner": "01a0fe9a-c404-71cb-9a5c-51dce1a3a0fd",
+  "toolchain": {
+    "node": "22.22.0",
+    "pnpm": "10.29.1"
+  },
+  "lockfile": {
+    "unchanged": true,
+    "sha256": "2feaea843846ce8959a7b4bfea08b52556e43ad1e46a1346501b1e22b4506f9f"
+  },
+  "identity_gate": {
+    "unchanged": true,
+    "sha256": "54fd23439a62ea2d4f93a428e06b7a2d69e1aa90c137889e2685efea58db69ef"
+  },
+  "checks": [
+    {
+      "command": "pnpm --filter @agent-native/desktop-app... install --frozen-lockfile --ignore-scripts",
+      "result": "pass",
+      "projects": 7
+    },
+    {
+      "command": "pnpm --filter '@agent-native/desktop-app^...' run build",
+      "result": "pass",
+      "projects": 6
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app typecheck",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app test",
+      "result": "pass",
+      "test_files": 72,
+      "tests": 666
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app exec vitest run src/renderer/App.fogbreak.spec.tsx",
+      "result": "pass",
+      "tests": 5
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app exec vitest run shared/fogbreak-packaging.spec.ts src/main/app-store.privacy.test.ts",
+      "result": "pass",
+      "tests": 10
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app build:fogbreak",
+      "result": "pass"
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app check:fogbreak:closure",
+      "result": "pass",
+      "static_nonbuiltin_references": 6,
+      "runtime_packages": 7,
+      "optional_probe": "virtual:agents-bundle (upstream guarded filesystem fallback)"
+    },
+    {
+      "command": "inject dangling require(@agent-native/core/shared), run closure, restore output, rerun closure",
+      "result": "pass",
+      "artifact_restored_byte_for_byte": true
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app test:computer-control",
+      "result": "failed",
+      "tests_passed": 67,
+      "tests_failed": 6,
+      "remaining_baseline_failures": 5,
+      "intended_protocol_difference_retested_pass": true,
+      "baseline_evidence": "privacy-baseline-evidence.json"
+    },
+    {
+      "command": "node --import tsx scripts/guard-i18n-catalogs.ts; node --import tsx scripts/guard-i18n-changed-copy.ts",
+      "result": "blocked_before_execution",
+      "reason": "Docs package remark-mdx absent from intentionally filtered dependency install"
+    },
+    {
+      "command": "pnpm --filter @agent-native/desktop-app build:fogbreak:mac-assets",
+      "result": "blocked_before_mac_commands",
+      "reason": "Approved Fogbreak icon missing"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    }
+  ],
+  "output_sha256": {
+    "out/main/index.js": "0085f9131f350b3751a903327cd08bd7c428ca2cba907ee2ad484ab0f26c1421",
+    "out/main/code-agent-runner-entry.js": "8b6d457e734336b01c02320f7418c7887791b5cd73649281c69041c7a69ce43e",
+    "out/main/packaged-multi-frontier-smoke-entry.js": "7db9e34f0e685d7e2a7f4fa8a686294bbe1379c6bdd8ab9fe680caca91deade3",
+    "out/preload/webview-chat.js": "4050765826ca3712ca7ee737c2394be655032537ca5497b7cd1faf144d98bc28",
+    "out/preload/index.js": "7f2f72a879ea58d48d02b6e8342a7e2aecdc685ffd1c3d803334c813d9d3a2d3",
+    "out/preload/webview.js": "6dfdb33a5b5f650b1f18d8f881fd3044ea74b173ae64f01cff3bd92429bcc9bd"
+  },
+  "not_executed": [
+    "macOS native assets/Swift/Chrome-extension packaging",
+    "ASAR package runtime smoke",
+    "signing and notarization",
+    "authenticated Fogbreak session/logout/actions/Resources journey",
+    "World/Golf/Games all-feature target-machine acceptance"
+  ],
+  "next_owners": {
+    "patch_integration": "Desktop source owner",
+    "approved_icon": "Desktop/design owner",
+    "website_content_activation_auth_and_features": "Main and existing Native public-seam/feature owners",
+    "mac_runner_and_signing": "Main and authorized owner release route",
+    "target_acceptance": "Desktop owner on intended Mac mini"
+  },
+  "remote_published": false,
+  "installed_generic_app_modified": false,
+  "production_mutations": false,
+  "real_folder_grants": false,
+  "provider_sessions_started": false
+}

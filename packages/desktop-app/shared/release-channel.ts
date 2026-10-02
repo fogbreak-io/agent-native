@@ -11,4 +11,4 @@ export const DESKTOP_RELEASE_CHANNEL: DesktopReleaseChannel =
     : "production";
 
 export const DESKTOP_DEEP_LINK_PROTOCOL =
-  DESKTOP_RELEASE_CHANNEL === "nightly" ? "agentnative-nightly" : "agentnative";
+  DESKTOP_RELEASE_CHANNEL === "nightly" ? "fogbreak-nightly" : "fogbreak";

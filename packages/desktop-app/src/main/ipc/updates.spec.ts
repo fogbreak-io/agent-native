@@ -56,6 +56,29 @@ const updaterState = vi.hoisted(() => {
   return updater;
 });
 
+// Controller behavior remains covered independently of the owned distribution's
+// disabled publisher. The real Fogbreak policy is covered in update-policy.spec.
+vi.mock("./update-policy.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./update-policy.js")>();
+  return {
+    ...original,
+    resolveDesktopUpdateSupport: (
+      packaged: boolean,
+      version: string,
+      channel = "release",
+    ) => {
+      const result = original.resolveDesktopUpdateSupport(
+        packaged,
+        version,
+        channel,
+      );
+      return !result.supported && result.reason.includes("Fogbreak configures")
+        ? { supported: true }
+        : result;
+    },
+  };
+});
+
 vi.mock("electron", () => ({
   app: electronState.app,
   BrowserWindow: electronState.browserWindow,

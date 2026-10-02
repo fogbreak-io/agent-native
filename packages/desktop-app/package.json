@@ -2,18 +2,17 @@
   "name": "@agent-native/desktop-app",
   "version": "0.1.150",
   "private": true,
-  "description": "Agent-Native desktop app",
-  "homepage": "https://agent-native.com",
+  "description": "Fogbreak desktop app",
+  "homepage": "https://fogbreak.io",
   "bugs": {
-    "url": "https://github.com/BuilderIO/agent-native/issues"
+    "url": "https://github.com/fogbreak-io/agent-native/issues"
   },
   "author": {
-    "name": "Builder.io, Inc",
-    "email": "support@builder.io"
+    "name": "Fogbreak"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/BuilderIO/agent-native",
+    "url": "https://github.com/fogbreak-io/agent-native",
     "directory": "packages/desktop-app"
   },
   "main": "out/main/index.js",
@@ -29,7 +28,11 @@
     "smoke:packaged-multi-frontier": "tsx scripts/smoke-packaged-multi-frontier.ts",
     "test": "vitest run src/main src/renderer shared --exclude \"**/*.test.ts\"",
     "test:computer-control": "vitest run src/main/computer-control src/main/browser-control src/main/app-store.privacy.test.ts src/main/privacy-regressions.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:fogbreak": "cross-env AGENT_NATIVE_DESKTOP_BUILD_CHANNEL=dev pnpm build",
+    "build:fogbreak:mac-assets": "node --import tsx scripts/build-fogbreak-assets.ts && pnpm build:native:mac && pnpm build:chrome-extension",
+    "build:fogbreak:mac": "pnpm build:fogbreak:mac-assets && pnpm build:fogbreak && electron-builder --mac --arm64 --config --publish never",
+    "check:fogbreak:closure": "node --import tsx scripts/check-fogbreak-closure.ts"
   },
   "dependencies": {
     "@agent-native/code-agents-ui": "workspace:*",
@@ -68,5 +71,5 @@
     "vitest": "^4.1.10"
   },
   "packageManager": "pnpm@10.29.1",
-  "productName": "Agent-Native"
+  "productName": "Fogbreak"
 }

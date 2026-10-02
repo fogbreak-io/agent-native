@@ -408,7 +408,7 @@ describe("CodeAgentsHub multi-frontier event boundary", () => {
     );
 
     expect(appSource).toContain("isDesktopSettingsShortcut");
-    expect(appSource).toContain("handleOpenSettings();");
+    expect(appSource).toContain("setShowSettings(true);");
     expect(mainSource).toContain('contents.on("before-input-event"');
     expect(mainSource).toContain('win.webContents.on("before-input-event"');
     expect(shortcutSource).toContain("isDesktopSettingsShortcut");
@@ -479,6 +479,7 @@ describe("CodeAgentsHub multi-frontier event boundary", () => {
     const ordered = orderDesktopApps(
       [
         { id: "brain", enabled: true },
+        { id: "fogbreak", enabled: true },
         { id: "analytics", enabled: true },
         { id: "content", enabled: true },
         { id: "design", enabled: true },
@@ -490,13 +491,14 @@ describe("CodeAgentsHub multi-frontier event boundary", () => {
     );
 
     expect(ordered.map((app) => app.id)).toEqual([
+      "fogbreak",
+      "content",
+      "brain",
+      "analytics",
+      "design",
       "mail",
       "calendar",
-      "design",
       "clips",
-      "content",
-      "analytics",
-      "brain",
     ]);
   });
 

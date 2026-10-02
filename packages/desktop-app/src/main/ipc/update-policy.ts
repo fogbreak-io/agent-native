@@ -8,9 +8,9 @@ export function resolveDesktopUserDataDirectoryName(
   isPackaged: boolean,
   version: string,
 ): string | null {
-  if (!isPackaged) return "Agent Native Dev"; // agent-native-brand-ok: preserve the legacy Electron profile directory.
-  if (isDesktopSsoCanaryVersion(version)) return "Agent Native SSO Canary"; // agent-native-brand-ok: preserve the legacy Electron profile directory.
-  return null;
+  if (!isPackaged) return "Fogbreak Dev";
+  if (isDesktopSsoCanaryVersion(version)) return "Fogbreak SSO Canary";
+  return version.includes("-nightly.") ? "Fogbreak Nightly" : "Fogbreak";
 }
 
 export type DesktopUpdateSupport =
@@ -50,5 +50,9 @@ export function resolveDesktopUpdateSupport(
     };
   }
 
-  return { supported: true };
+  return {
+    supported: false,
+    reason:
+      "Auto-update is unavailable until Fogbreak configures an owned update service",
+  };
 }
