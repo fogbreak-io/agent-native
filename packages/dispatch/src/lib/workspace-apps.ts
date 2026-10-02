@@ -265,8 +265,13 @@ function workspaceAppMountPath(
   return normalizedWorkspaceAppMountPath(app.path?.trim() || "/");
 }
 
-export function workspaceAppRouteForChildPath(
-  app: Pick<WorkspaceAppSummary, "id" | "path" | "url">,
+/**
+ * The app-local route (relative to the app's mount, with search and hash) for
+ * a path the child frame reported, or `null` when the path is not a safe
+ * same-app route.
+ */
+export function workspaceAppLocalPathForChildPath(
+  app: Pick<WorkspaceAppSummary, "path" | "url">,
   childPath: string,
 ): string | null {
   const parsed = normalizeWorkspaceAppRoutePath(childPath);
@@ -279,9 +284,52 @@ export function workspaceAppRouteForChildPath(
       parsed.pathname.startsWith(`${mountPath}/`))
       ? parsed.pathname.slice(mountPath.length) || "/"
       : parsed.pathname;
-  const routePath = workspaceAppRoute(app.id);
-  const suffix = relativePathname === "/" ? "" : relativePathname;
-  return `${routePath}${suffix}${parsed.search}${parsed.hash}`;
+  return `${relativePathname}${parsed.search}${parsed.hash}`;
+}
+
+/** A safe app-local route (`/path?search#hash`), or `null`. */
+export function normalizeWorkspaceAppLocalPath(path: string): string | null {
+  const parsed = normalizeWorkspaceAppRoutePath(path);
+  return parsed ? `${parsed.pathname}${parsed.search}${parsed.hash}` : null;
+}
+
+export function workspaceAppRouteForLocalPath(
+  appId: string,
+  localPath: string,
+): string | null {
+  const parsed = normalizeWorkspaceAppRoutePath(localPath);
+  if (!parsed) return null;
+  const suffix = parsed.pathname === "/" ? "" : parsed.pathname;
+  return `${workspaceAppRoute(appId)}${suffix}${parsed.search}${parsed.hash}`;
+}
+
+export function workspaceAppRouteForChildPath(
+  app: Pick<WorkspaceAppSummary, "id" | "path" | "url">,
+  childPath: string,
+): string | null {
+  const localPath = workspaceAppLocalPathForChildPath(app, childPath);
+  return localPath === null
+    ? null
+    : workspaceAppRouteForLocalPath(app.id, localPath);
+}
+
+/**
+ * The app-local route encoded by a Dispatch `/apps/:appId/*` location, or
+ * `null` when the location is not a route for `appId`. The bare app route is
+ * `"/"`.
+ */
+export function workspaceAppLocalPathFromRoute(
+  appId: string,
+  pathname: string,
+  search: string,
+  hash: string,
+): string | null {
+  const routeAppId = workspaceAppIdFromRoute(pathname);
+  if (!routeAppId || routeAppId.toLowerCase() !== appId.trim().toLowerCase()) {
+    return null;
+  }
+  const splat = pathname.replace(/^\/apps\/[^/]+/, "");
+  return workspaceAppInitialPathFromSplat(splat, search, hash) ?? "/";
 }
 
 export function workspaceAppInitialPathFromSplat(

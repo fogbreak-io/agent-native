@@ -37,7 +37,12 @@ describe("Dispatch workspace app chat rail", () => {
 
   it("routes the open-app rail through the shared app-chat component", () => {
     expect(layoutSource).toContain("<WorkspaceAppChatRail");
-    expect(layoutSource).toContain("workspaceAppChatRegistration ? (");
+    expect(layoutSource).toContain(
+      "enabled={workspaceAppRouteActive && !!workspaceAppChatRegistration}",
+    );
+    expect(layoutSource).toContain(
+      "onFullscreenRequest={openWorkspaceAppChatFullView}",
+    );
     expect(layoutSource).toContain("data-dispatch-workspace-app-frame");
     expect(layoutSource).toContain('new Event("agent-panel:toggle")');
     expect(layoutSource).toContain('new CustomEvent("agent-panel:toggle"');

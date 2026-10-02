@@ -4,6 +4,7 @@ export { AdminShell } from "./admin-navigation.js";
 export { Layout, NavContent } from "./layout/Layout.js";
 export type {
   DispatchExtensionConfig,
+  DispatchWorkspaceAppsExtension,
   DispatchLayoutProps,
   DispatchNavContentProps,
   DispatchNavIcon,
@@ -16,3 +17,16 @@ export { AppKeysPopover } from "./app-keys-popover.js";
 export { ActionQueryError } from "./action-query-error.js";
 export { SimpleAgentsPanel } from "./simple-agents-panel.js";
 export { WorkspaceAppCard } from "./workspace-app-card.js";
+export type {
+  WorkspaceAppFrameFailure,
+  WorkspaceAppFrameIdentity,
+  WorkspaceAppFrameLifecycleEvent,
+  WorkspaceAppFrameLifecyclePhase,
+  WorkspaceAppHostExtensions,
+  WorkspaceAppThemeDelivery,
+  WorkspaceAppThemeExtension,
+} from "./workspace-app-host.js";
+export type {
+  WorkspaceAppChatHandoff,
+  WorkspaceAppChatReturnTarget,
+} from "../lib/workspace-app-chat-handoff.js";

@@ -80,6 +80,19 @@ vi.mock("../../components/layout/Layout", () => ({
   }),
 }));
 
+vi.mock("../../components/workspace-app-chat-full-view", () => ({
+  WorkspaceAppChatFullView: ({
+    handoff,
+  }: {
+    handoff: { appId: string; threadId?: string };
+  }) => (
+    <div
+      data-test-app-chat-full-view={handoff.appId}
+      data-test-app-chat-thread={handoff.threadId ?? ""}
+    />
+  ),
+}));
+
 vi.mock("../../lib/workspace-app-layout", () => ({
   workspaceAppMatchesQuery: (
     app: { name: string; description?: string },
@@ -142,6 +155,42 @@ describe("Dispatch ChatRoute", () => {
     container.remove();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("routes an app chat handoff to the app's own chat, not Dispatch chat", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter
+          initialEntries={["/chat/t1?appChat=mail&appReturn=%2Finbox"]}
+        >
+          <ChatRoute />
+        </MemoryRouter>,
+      );
+    });
+
+    const fullView = container.querySelector("[data-test-app-chat-full-view]");
+    expect(fullView?.getAttribute("data-test-app-chat-full-view")).toBe("mail");
+    expect(fullView?.getAttribute("data-test-app-chat-thread")).toBe("t1");
+    expect(clientState.surfaceProps).toBeNull();
+  });
+
+  it("shows a malformed app chat handoff as unavailable, not global chat", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter
+          initialEntries={["/chat/t1?appChat=mail&appReturn=%2F%2Fevil.test"]}
+        >
+          <ChatRoute />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(
+      container
+        .querySelector("[data-dispatch-app-chat-unavailable-reason]")
+        ?.getAttribute("data-dispatch-app-chat-unavailable-reason"),
+    ).toBe("invalid-handoff");
+    expect(clientState.surfaceProps).toBeNull();
   });
 
   it("keeps the centered hero layout for a direct new Chat", async () => {

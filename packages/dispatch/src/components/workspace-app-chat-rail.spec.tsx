@@ -134,7 +134,8 @@ describe("WorkspaceAppChatRail", () => {
     expect(
       container.querySelector("[data-dispatch-app-chat-unavailable]"),
     ).not.toBeNull();
-    expect(container.querySelector("[data-agent-sidebar]")).toBeNull();
+    // The sidebar shell stays as the app surface's parent, with no chat.
+    expect(railState.sidebarProps.at(-1)?.enabled).toBe(false);
     expect(container.querySelector("[data-app-surface]")).not.toBeNull();
   });
 

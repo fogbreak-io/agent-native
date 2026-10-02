@@ -102,6 +102,11 @@ import { toast } from "sonner";
 
 import { useIsMobile } from "../../hooks/use-mobile";
 import { cn } from "../../lib/utils";
+import {
+  buildWorkspaceAppChatFullViewPath,
+  parseWorkspaceAppChatFullViewLocation,
+  type WorkspaceAppChatHandoff,
+} from "../../lib/workspace-app-chat-handoff";
 import { normalizeWorkspaceAppLayout } from "../../lib/workspace-app-layout";
 import {
   isDispatchWorkspaceAppId,
@@ -113,6 +118,7 @@ import {
   workspaceAppIdFromRoute,
   workspaceAppDirectHref,
   workspaceAppDirectLaunchHref,
+  workspaceAppLocalPathFromRoute,
   workspaceAppRoute,
   workspaceAppTargetPath,
   type WorkspaceAppSummary,
@@ -147,6 +153,7 @@ import {
   WorkspaceAppChatRail,
   WorkspaceAppFrame,
   WorkspaceAppKeepAlive,
+  type WorkspaceAppHostExtensions,
 } from "../workspace-app-host";
 import { Header } from "./Header";
 import {
@@ -174,10 +181,24 @@ export interface DispatchNavItem {
   adminTo?: string;
 }
 
+/**
+ * Workspace app extension: the host extension Native threads to every
+ * workspace app frame, plus observation of app-chat full-view handoffs.
+ */
+export interface DispatchWorkspaceAppsExtension extends WorkspaceAppHostExtensions {
+  /**
+   * Observes a Native-owned handoff from an app's chat rail to full view.
+   * Native has already validated the handoff and navigates regardless; the
+   * callback must not navigate or treat the handoff as an access grant.
+   */
+  onAppChatFullView?: (handoff: Readonly<WorkspaceAppChatHandoff>) => void;
+}
+
 export interface DispatchExtensionConfig {
   chatFirst?: boolean;
   navItems?: readonly DispatchNavItem[];
   queryKeys?: readonly string[];
+  workspaceApps?: DispatchWorkspaceAppsExtension;
 }
 
 const PRIMARY_NAV_ITEMS = [
@@ -1412,7 +1433,13 @@ function DispatchLayout({
     location.pathname,
     useFeatureFlagState(SETTINGS_REDESIGN_FLAG.key),
   );
-  const chatFirstSurfaceScope = threadIdFromPath(localPathname) ?? "new";
+  const isWorkspaceAppChatFullView =
+    isChatRoute &&
+    parseWorkspaceAppChatFullViewLocation(localPathname, location.search)
+      .kind !== "none";
+  const chatFirstSurfaceScope = isWorkspaceAppChatFullView
+    ? "new"
+    : (threadIdFromPath(localPathname) ?? "new");
   const isWorkspaceAppRoute = shouldAutoCollapseDispatchSidebar(
     location.pathname,
   );
@@ -1424,6 +1451,22 @@ function DispatchLayout({
     isWorkspaceAppRoute &&
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("embedded") === "1";
+  const workspaceAppChildRoutesRef = useRef(new Map<string, string>());
+  const handleWorkspaceAppChildRoute = useCallback(
+    (appId: string, route: string) => {
+      const url = new URL(route, "https://agent-native.invalid");
+      const localPath = workspaceAppLocalPathFromRoute(
+        appId,
+        url.pathname,
+        url.search,
+        url.hash,
+      );
+      if (localPath !== null) {
+        workspaceAppChildRoutesRef.current.set(appId.toLowerCase(), localPath);
+      }
+    },
+    [],
+  );
   const [chatFirstPreference, setChatFirstPreference] = useState(() =>
     readChatFirstMode(),
   );
@@ -2370,6 +2413,42 @@ function DispatchLayout({
       dispatchNavLinkTarget("/chat"),
     );
   }
+  function openWorkspaceAppChatFullView(threadId?: string) {
+    if (!workspaceAppId) return;
+    const appId = workspaceAppId;
+    const returnPath =
+      workspaceAppChildRoutesRef.current.get(appId.toLowerCase()) ??
+      workspaceAppLocalPathFromRoute(
+        appId,
+        localPathname,
+        location.search,
+        location.hash,
+      ) ??
+      "/";
+    const entryThreadId = threadId?.trim() || undefined;
+    const handoff: WorkspaceAppChatHandoff = {
+      appId,
+      ...(entryThreadId ? { threadId: entryThreadId } : {}),
+      returnTarget: { appId, path: returnPath },
+    };
+    const target = buildWorkspaceAppChatFullViewPath(handoff);
+    if (!target) {
+      console.warn(
+        `[dispatch] could not build app chat full view for ${appId}`,
+      );
+      return;
+    }
+    try {
+      extensions?.workspaceApps?.onAppChatFullView?.(Object.freeze(handoff));
+    } catch (cause) {
+      console.warn("[dispatch] onAppChatFullView observer threw", cause);
+    }
+    navigateWithAgentChatViewTransition(
+      navigate,
+      dispatchNavLinkTarget(target),
+      { state: { dispatchAppChatEntry: { threadId: entryThreadId ?? null } } },
+    );
+  }
   function openRunThread(threadId: string) {
     void navigate("/chat", {
       state: {
@@ -2461,25 +2540,43 @@ function DispatchLayout({
         (app) => app.id.toLowerCase() === workspaceAppId.toLowerCase(),
       )
     : undefined;
-  const workspaceAppContent =
-    workspaceAppRouteActive && workspaceAppId ? (
-      workspaceAppChatRegistration ? (
-        <WorkspaceAppChatRail
-          appId={workspaceAppId}
-          appName={workspaceAppChatRegistration.name ?? workspaceAppId}
-          agentPageHref={agentPageHref}
-          onFullscreenRequest={openAskAgentFullscreen}
-        >
-          <WorkspaceAppKeepAlive activeAppId={workspaceAppId} />
-        </WorkspaceAppChatRail>
-      ) : (
-        <WorkspaceAppKeepAlive activeAppId={workspaceAppId} />
+  const workspaceAppInitialPath = workspaceAppId
+    ? workspaceAppLocalPathFromRoute(
+        workspaceAppId,
+        localPathname,
+        location.search,
+        location.hash,
       )
-    ) : (
-      <WorkspaceAppKeepAlive
-        activeAppId={workspaceAppRouteActive ? workspaceAppId : null}
-      />
-    );
+    : null;
+  // One tree shape on every route: swapping the rail wrapper in and out would
+  // re-parent the keep-alive cache, reloading every retained app frame.
+  const workspaceAppContent = (
+    <div
+      data-dispatch-workspace-app-surface
+      className={
+        workspaceAppRouteActive ? "absolute inset-0 overflow-hidden" : "hidden"
+      }
+    >
+      <WorkspaceAppChatRail
+        appId={workspaceAppId ?? ""}
+        appName={workspaceAppChatRegistration?.name ?? workspaceAppId ?? ""}
+        enabled={workspaceAppRouteActive && !!workspaceAppChatRegistration}
+        agentPageHref={agentPageHref}
+        onFullscreenRequest={openWorkspaceAppChatFullView}
+      >
+        <WorkspaceAppKeepAlive
+          activeAppId={workspaceAppRouteActive ? workspaceAppId : null}
+          activeInitialPath={
+            workspaceAppInitialPath && workspaceAppInitialPath !== "/"
+              ? workspaceAppInitialPath
+              : undefined
+          }
+          extensions={extensions?.workspaceApps}
+          onChildRouteChange={handleWorkspaceAppChildRoute}
+        />
+      </WorkspaceAppChatRail>
+    </div>
+  );
   const content = isChatRoute ? (
     <div
       className={cn(

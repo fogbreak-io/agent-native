@@ -17,7 +17,9 @@ import { ActionQueryError } from "../../components/action-query-error";
 import { DispatchChatHomeApps } from "../../components/chat-home-apps";
 import { useDispatchExtensions } from "../../components/layout/Layout";
 import { Skeleton } from "../../components/ui/skeleton";
+import { WorkspaceAppChatFullView } from "../../components/workspace-app-chat-full-view";
 import { submitOverviewPrompt } from "../../lib/overview-chat";
+import { parseWorkspaceAppChatFullViewLocation } from "../../lib/workspace-app-chat-handoff";
 
 interface WorkspaceAgentResource {
   id: string;
@@ -93,7 +95,14 @@ export default function ChatRoute() {
   const t = useT();
   const location = useLocation();
   const navigate = useNavigate();
-  const routeThreadId = threadIdFromPath(location.pathname);
+  const appChatFullView = parseWorkspaceAppChatFullViewLocation(
+    stripBasePath(location.pathname),
+    location.search,
+  );
+  const routeThreadId =
+    appChatFullView.kind === "none"
+      ? threadIdFromPath(location.pathname)
+      : null;
   const agentPath = new URLSearchParams(location.search).get("agent");
   const agentsQuery = useActionQuery<WorkspaceAgentResource[]>(
     "list-workspace-resources",
@@ -209,7 +218,9 @@ export default function ChatRoute() {
     thread?.threadId,
   ]);
 
+  const isAppChatFullView = appChatFullView.kind !== "none";
   useEffect(() => {
+    if (isAppChatFullView) return;
     function handleChatRunning(event: Event) {
       const detail = (event as CustomEvent).detail;
       if (detail?.isRunning === true) markAgentChatHomeHandoff("dispatch");
@@ -218,7 +229,7 @@ export default function ChatRoute() {
     window.addEventListener("agentNative.chatRunning", handleChatRunning);
     return () =>
       window.removeEventListener("agentNative.chatRunning", handleChatRunning);
-  }, []);
+  }, [isAppChatFullView]);
 
   useEffect(() => {
     if (!agent) return;
@@ -239,6 +250,29 @@ export default function ChatRoute() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [agent?.id, agent?.name, agent?.path]);
+
+  // App chat never falls back to the Dispatch global chat: an unparseable
+  // handoff is an explicit unavailable state.
+  if (appChatFullView.kind === "app") {
+    return (
+      <WorkspaceAppChatFullView
+        key={`app-chat:${appChatFullView.handoff.appId.toLowerCase()}`}
+        handoff={appChatFullView.handoff}
+      />
+    );
+  }
+
+  if (appChatFullView.kind === "invalid") {
+    return (
+      <div
+        data-dispatch-app-chat-full-view="unavailable"
+        data-dispatch-app-chat-unavailable-reason="invalid-handoff"
+        className="flex h-full min-h-0 items-center justify-center bg-background px-4 text-sm text-muted-foreground"
+      >
+        {t("dispatch.pages.pageNotFoundDescription")}
+      </div>
+    );
+  }
 
   if (agentPath && agentsQuery.isLoading) {
     return (

@@ -170,7 +170,13 @@ vi.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: clientState.theme }),
 }));
 
-import { WorkspaceAppFrame, WorkspaceAppKeepAlive } from "./workspace-app-host";
+import {
+  WORKSPACE_APP_FRAME_LOAD_TIMEOUT_MS,
+  WorkspaceAppFrame,
+  WorkspaceAppKeepAlive,
+  type WorkspaceAppFrameLifecycleEvent,
+  type WorkspaceAppHostExtensions,
+} from "./workspace-app-host";
 
 describe("WorkspaceAppKeepAlive", () => {
   let container: HTMLDivElement;
@@ -832,5 +838,401 @@ describe("WorkspaceAppKeepAlive", () => {
       container.querySelectorAll("[data-dispatch-workspace-app-cache-entry]"),
     ).toHaveLength(3);
     expect(container.querySelectorAll("iframe")).toHaveLength(3);
+  });
+});
+
+describe("WorkspaceAppFrame host extensions", () => {
+  const ORIGIN = "https://mail.example.test";
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    clientState.workspaceApps = null;
+    clientState.legacyMutateError = null;
+    clientState.legacyMutateAsync.mockReset();
+    clientState.legacyMutateAsync.mockResolvedValue({
+      startUrl: `${ORIGIN}/_agent-native/embed`,
+    });
+    clientState.workspaceSsoMutateAsync.mockReset();
+    clientState.inBuilderFrame = false;
+    clientState.clientSurface = "web";
+    clientState.frameLoadHandler = null;
+    clientState.suppressFrameLoad = true;
+    clientState.theme = "dark";
+    clientState.workspaceSsoEnabled = false;
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    clientState.suppressFrameLoad = false;
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function flush() {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  function frameWindowSpy() {
+    const iframe = container.querySelector<HTMLIFrameElement>("iframe");
+    if (!iframe) throw new Error("Workspace app iframe was not rendered");
+    const postMessage = vi.fn();
+    const frameWindow = { postMessage } as unknown as Window;
+    Object.defineProperty(iframe, "contentWindow", {
+      configurable: true,
+      value: frameWindow,
+    });
+    return { postMessage, frameWindow };
+  }
+
+  async function load() {
+    await act(async () => {
+      clientState.frameLoadHandler?.();
+      await Promise.resolve();
+    });
+  }
+
+  function renderFrame(
+    extensions: WorkspaceAppHostExtensions | undefined,
+    active = true,
+  ) {
+    return act(async () => {
+      root.render(
+        <WorkspaceAppFrame
+          app={{ id: "mail", name: "Mail", path: "/", url: ORIGIN }}
+          active={active}
+          extensions={extensions}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  const COMPLETE_VARS = {
+    "--background": "0 0% 4%",
+    "--primary": "200 80% 50%",
+  };
+
+  it("posts the resolver's complete update to the validated frame origin only", async () => {
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+    const resolveThemeUpdate = vi.fn(({ theme }) => ({
+      type: "agent-native-theme-update" as const,
+      theme,
+      vars: COMPLETE_VARS,
+    }));
+    const extensions: WorkspaceAppHostExtensions = {
+      theme: { revision: 1, resolveThemeUpdate },
+      onFrameLifecycle: (event) => events.push(event),
+    };
+    await renderFrame(extensions);
+    const { postMessage } = frameWindowSpy();
+    await load();
+
+    expect(postMessage).toHaveBeenLastCalledWith(
+      {
+        type: "agent-native-theme-update",
+        theme: "dark",
+        isDark: true,
+        vars: COMPLETE_VARS,
+      },
+      ORIGIN,
+    );
+    const loaded = events.find((event) => event.phase === "frame-loaded");
+    expect(loaded).toMatchObject({
+      themeDelivery: "complete",
+      identity: {
+        appId: "mail",
+        loadRevision: 1,
+        active: true,
+        path: "/home",
+        targetOrigin: ORIGIN,
+      },
+    });
+    expect(Object.isFrozen(loaded?.identity)).toBe(true);
+    expect(resolveThemeUpdate).toHaveBeenLastCalledWith({
+      identity: expect.objectContaining({ loadRevision: 1 }),
+      theme: "dark",
+    });
+  });
+
+  it("treats a null baseline as unavailable: mode only, never a reset", async () => {
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+    await renderFrame({
+      theme: { revision: 1, resolveThemeUpdate: () => null },
+      onFrameLifecycle: (event) => events.push(event),
+    });
+    const { postMessage } = frameWindowSpy();
+    await load();
+
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { type: "agent-native-theme-update", theme: "dark", isDark: true },
+      "*",
+    );
+    expect(
+      events.find((event) => event.phase === "frame-loaded")?.themeDelivery,
+    ).toBe("baseline-unavailable");
+  });
+
+  it.each([
+    [
+      "a mode that disagrees with the resolved theme",
+      () => ({
+        type: "agent-native-theme-update" as const,
+        theme: "light" as const,
+        vars: COMPLETE_VARS,
+      }),
+    ],
+    [
+      "a token outside the public theme contract",
+      () => ({
+        type: "agent-native-theme-update" as const,
+        theme: "dark" as const,
+        vars: { ...COMPLETE_VARS, "--not-a-theme-token": "red" },
+      }),
+    ],
+    [
+      "a resolver that throws",
+      () => {
+        throw new Error("boom");
+      },
+    ],
+  ])("rejects %s and posts the mode only", async (_label, resolver) => {
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+    await renderFrame({
+      theme: { revision: 1, resolveThemeUpdate: resolver },
+      onFrameLifecycle: (event) => events.push(event),
+    });
+    const { postMessage } = frameWindowSpy();
+    await load();
+
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { type: "agent-native-theme-update", theme: "dark", isDark: true },
+      "*",
+    );
+    expect(
+      events.find((event) => event.phase === "frame-loaded")?.themeDelivery,
+    ).toBe("rejected");
+  });
+
+  it("re-resolves through the same post path on revision and active changes", async () => {
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+    let accent = "200 80% 50%";
+    const resolveThemeUpdate = vi.fn(({ theme }) => ({
+      type: "agent-native-theme-update" as const,
+      theme,
+      vars: { ...COMPLETE_VARS, "--primary": accent },
+    }));
+    const onFrameLifecycle = (event: WorkspaceAppFrameLifecycleEvent) =>
+      events.push(event);
+    await renderFrame({
+      theme: { revision: 1, resolveThemeUpdate },
+      onFrameLifecycle,
+    });
+    const { postMessage } = frameWindowSpy();
+    await load();
+
+    accent = "10 90% 40%";
+    await renderFrame({
+      theme: { revision: 2, resolveThemeUpdate },
+      onFrameLifecycle,
+    });
+    expect(postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        vars: { ...COMPLETE_VARS, "--primary": "10 90% 40%" },
+      }),
+      ORIGIN,
+    );
+
+    accent = "200 80% 50%";
+    await renderFrame(
+      { theme: { revision: 3, resolveThemeUpdate }, onFrameLifecycle },
+      false,
+    );
+    expect(postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ vars: COMPLETE_VARS }),
+      ORIGIN,
+    );
+    expect(resolveThemeUpdate).toHaveBeenLastCalledWith({
+      identity: expect.objectContaining({ active: false }),
+      theme: "dark",
+    });
+    expect(events.map((event) => event.phase)).toContain("active-change");
+  });
+
+  it("tracks trusted child routes in the identity and ignores untrusted ones", async () => {
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+    await renderFrame({ onFrameLifecycle: (event) => events.push(event) });
+    const { frameWindow } = frameWindowSpy();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "agent-native:workspace-app-route", path: "/inbox/5" },
+          origin: ORIGIN,
+          source: frameWindow,
+        }),
+      );
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "agent-native:workspace-app-route", path: "/spoof" },
+          origin: "https://evil.example.test",
+          source: frameWindow,
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    const routeChanges = events.filter(
+      (event) => event.phase === "route-change",
+    );
+    expect(routeChanges).toHaveLength(1);
+    expect(routeChanges[0]?.identity.path).toBe("/inbox/5");
+  });
+
+  it("reports a terminal timeout when the frame never loads, and disposal", async () => {
+    vi.useFakeTimers();
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+    await renderFrame({ onFrameLifecycle: (event) => events.push(event) });
+    frameWindowSpy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(WORKSPACE_APP_FRAME_LOAD_TIMEOUT_MS);
+    });
+    expect(events.at(-1)).toMatchObject({
+      phase: "frame-load-failed",
+      failure: "timeout",
+      identity: { loadRevision: 0 },
+    });
+    expect(events.some((event) => event.phase === "frame-loaded")).toBe(false);
+
+    const frameInstanceId = events.at(-1)?.identity.frameInstanceId;
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(events.at(-1)).toMatchObject({
+      phase: "disposed",
+      identity: { frameInstanceId },
+    });
+  });
+
+  it("reports a refused embed session without inventing a loaded frame", async () => {
+    clientState.workspaceSsoEnabled = true;
+    clientState.workspaceSsoMutateAsync.mockRejectedValue(
+      Object.assign(new Error("Forbidden"), { status: 403 }),
+    );
+    const events: WorkspaceAppFrameLifecycleEvent[] = [];
+
+    await act(async () => {
+      root.render(
+        <WorkspaceAppFrame
+          app={{
+            id: "mail",
+            name: "Mail",
+            path: "/mail",
+            url: "https://mail.agent-native.com",
+          }}
+          extensions={{ onFrameLifecycle: (event) => events.push(event) }}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(events).toEqual([
+      expect.objectContaining({
+        phase: "frame-load-failed",
+        failure: "refused",
+        identity: expect.objectContaining({ targetOrigin: null }),
+      }),
+    ]);
+  });
+});
+
+describe("WorkspaceAppKeepAlive route seeding", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    clientState.workspaceApps = null;
+    clientState.legacyMutateError = null;
+    clientState.legacyMutateAsync.mockReset();
+    clientState.legacyMutateAsync.mockResolvedValue({
+      startUrl: "about:blank",
+    });
+    clientState.suppressFrameLoad = false;
+    clientState.workspaceSsoEnabled = false;
+    clientState.inBuilderFrame = false;
+    clientState.clientSurface = "web";
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens an entering app at its route and keeps retained frames on their own route", async () => {
+    const onChildRouteChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <WorkspaceAppKeepAlive
+          activeAppId="mail"
+          activeInitialPath="/inbox/5"
+          onChildRouteChange={onChildRouteChange}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(clientState.legacyMutateAsync).toHaveBeenCalledWith({
+      app: "mail",
+      path: "/inbox/5",
+      chrome: "minimal",
+    });
+    expect(onChildRouteChange).toHaveBeenCalledWith(
+      "mail",
+      "/apps/mail/inbox/5",
+    );
+
+    await act(async () => {
+      root.render(
+        <WorkspaceAppKeepAlive
+          activeAppId={null}
+          onChildRouteChange={onChildRouteChange}
+        />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      root.render(
+        <WorkspaceAppKeepAlive
+          activeAppId="mail"
+          activeInitialPath="/other"
+          onChildRouteChange={onChildRouteChange}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(clientState.legacyMutateAsync).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll("iframe")).toHaveLength(1);
   });
 });
