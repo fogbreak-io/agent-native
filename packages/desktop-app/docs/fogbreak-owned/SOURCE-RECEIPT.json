@@ -1,0 +1,197 @@
+{
+  "status": "continuing_desktop_integration_cloud_handoff_requested",
+  "observed_at": "2026-10-02T22:28:55.462721+00:00",
+  "desktop_owner": "01a0fe9a-c404-71cb-9a5c-51dce1a3a0fd",
+  "integration_owner": "01a0f98e-584b-7201-a8f7-eadb5ccbedf4",
+  "parent": "01a0f03d-30d4-7743-9e50-2d6b75743029",
+  "upstream_commit": "90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd",
+  "upstream_release": "0.1.273",
+  "proposed_branch": "fogbreak/desktop-native-273",
+  "branch_created": true,
+  "product_source_changed": false,
+  "cloud_build_run": false,
+  "generic_installed_app_changed_this_phase": false,
+  "brief_path": "/Volumes/NVME/Codex-scratch/projects/fogbreak-audit-implementation-20260922/plans/fogbreak-owned-desktop-20261002-01a0fe9a/IMPLEMENTATION-BRIEF.md",
+  "brief_sha256": "7329c94a119c9c36075512337ab115486328fa4e07906a72a3f0843e807cee3d",
+  "signing_readback": {
+    "command": "security find-identity -v -p codesigning",
+    "exit_code": 0,
+    "stdout": "0 valid identities found",
+    "limitation": "No visible valid identity in this context; owner/cloud identity existence not established."
+  },
+  "sources": [
+    {
+      "upstream_path": ".github/workflows/desktop-release.yml",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/.github/workflows/desktop-release.yml",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/.github__workflows__desktop-release.yml",
+      "bytes": 19875,
+      "sha256": "24fd552355ccb8972794d00c55196f7d40b3c7754b2a3be0e8bc36ee9f8d3ec2"
+    },
+    {
+      "upstream_path": "packages/desktop-app/README.md",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/README.md",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__README.md",
+      "bytes": 12203,
+      "sha256": "fe02b6a2375b2fccbd66f02eba7a4d43f9cf39064417e4905699f7bc68b7b8de"
+    },
+    {
+      "upstream_path": "packages/desktop-app/electron-builder.yml",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/electron-builder.yml",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__electron-builder.yml",
+      "bytes": 2243,
+      "sha256": "ef173146522d46b07ce955bc2b2197a7bc6c1152383c73400e4bcb63cd438fc7"
+    },
+    {
+      "upstream_path": "packages/desktop-app/electron.vite.config.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/electron.vite.config.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__electron.vite.config.ts",
+      "bytes": 8404,
+      "sha256": "50ead55236298f1bffab7e1c1a8ef5ec81f25aeaf4d1cac6077866a8d0961d16"
+    },
+    {
+      "upstream_path": "packages/desktop-app/package.json",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/package.json",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__package.json",
+      "bytes": 2889,
+      "sha256": "090d41f9339ad1ae2c424e5aeb5628793d928c0b07a44ec203760c99d1f6f0c8"
+    },
+    {
+      "upstream_path": "packages/desktop-app/shared/app-registry.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/shared/app-registry.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__shared__app-registry.ts",
+      "bytes": 3941,
+      "sha256": "709d99d8cee7045c6fc091dfd82d4dc91760fe53109875be54f83686b2d231bc"
+    },
+    {
+      "upstream_path": "packages/desktop-app/shared/release-channel.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/shared/release-channel.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__shared__release-channel.ts",
+      "bytes": 506,
+      "sha256": "729994444602b41ac6ad24bf333f46b70a1297579daac1ca7fbf17008f37f47a"
+    },
+    {
+      "upstream_path": "packages/desktop-app/shared/sentry-config.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/shared/sentry-config.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__shared__sentry-config.ts",
+      "bytes": 4695,
+      "sha256": "5c07cfd1fdae6b0fa01ce75fbf472bbc1aee90a8ff0b7d3677662dad1f3a7488"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/app-store.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/app-store.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__app-store.ts",
+      "bytes": 25530,
+      "sha256": "0f20315bb0aa411f9360509b7ef6587861a06e910d5a787e8fe9a4ca19c50026"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/content-files-webview-access.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/content-files-webview-access.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__content-files-webview-access.ts",
+      "bytes": 1362,
+      "sha256": "ba3266509c39ba2aa0ef13be1c4e251ba983db0ab91cf449f27652c9a9441fba"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/desktop-identity.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/desktop-identity.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__desktop-identity.ts",
+      "bytes": 115340,
+      "sha256": "4e57355b264d4143d8f6100b32b11a1ef0d4d9968894780edf9d6fed33863e7b"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/index.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/index.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__index.ts",
+      "bytes": 442672,
+      "sha256": "2c4c14fab2df16befcd950f7e5ee939743df4ced5d145331d35f37aeb12f5c03"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/ipc/update-policy.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/ipc/update-policy.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__ipc__update-policy.ts",
+      "bytes": 1514,
+      "sha256": "2887b2fdb2da5741d63e838065e492343b4f1bce2c2eb6ce448f86a34e8f2563"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/ipc/updates.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/ipc/updates.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__ipc__updates.ts",
+      "bytes": 12796,
+      "sha256": "9e57a58b471878c52db4150943b3fe334e6454b4335b3e5a943da062d6ec83da"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/main/workspace-apps.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/main/workspace-apps.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__main__workspace-apps.ts",
+      "bytes": 4393,
+      "sha256": "0b61c1c0cd526d2fb8dfefadb3413ce8e86343031035c64d1a89cf2ffe306b28"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/renderer/App.tsx",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/renderer/App.tsx",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__renderer__App.tsx",
+      "bytes": 18273,
+      "sha256": "600fa83c605cd028d35d75ff8d1055da0b257bf88412ef1c16b030843c4287ae"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/renderer/components/AppSettings.tsx",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/renderer/components/AppSettings.tsx",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__renderer__components__AppSettings.tsx",
+      "bytes": 73196,
+      "sha256": "02acfafc32adaf3646f9ae7974f644ebc31d3fb8c1df20d787a207f6df4e8ed6"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/renderer/components/AppWebview.tsx",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/renderer/components/AppWebview.tsx",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__renderer__components__AppWebview.tsx",
+      "bytes": 65742,
+      "sha256": "a4e180472fe5c5b2f5859e7f2c0a15392fd0b174160476743299e89b9ff6f0fc"
+    },
+    {
+      "upstream_path": "packages/desktop-app/src/renderer/components/DesktopIdentityGate.tsx",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/desktop-app/src/renderer/components/DesktopIdentityGate.tsx",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__desktop-app__src__renderer__components__DesktopIdentityGate.tsx",
+      "bytes": 10201,
+      "sha256": "54fd23439a62ea2d4f93a428e06b7a2d69e1aa90c137889e2685efea58db69ef"
+    },
+    {
+      "upstream_path": "packages/shared-app-config/templates.ts",
+      "url": "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/packages/shared-app-config/templates.ts",
+      "cache_path": "/tmp/fogbreak-owned-desktop-source-273/packages__shared-app-config__templates.ts",
+      "bytes": 6590,
+      "sha256": "558284219d3461fe828fff186bd4ca71bc8ce14603036a601bc4955c57dc0084"
+    }
+  ],
+  "other_primary_sources": [
+    "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/README.md",
+    "https://github.com/BuilderIO/agent-native/blob/90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd/package.json",
+    "https://developer.apple.com/developer-id/",
+    "https://www.electron.build/mac/"
+  ],
+  "terminal_reason": "Desktop objective continues. Next bounded cloud source/runtime allocation requested from Main; no local heavy build until packaging route assigned.",
+  "next_action": "Main assigns this packet to existing cloud capacity; desktop owner integrates terminal receipts and performs eventual authorized Mini smoke; Main owns website/public-seam integration; human owner supplies personal signer steps only if required.",
+  "target_acceptance": {
+    "path": "/Volumes/NVME/Codex-scratch/projects/fogbreak-audit-implementation-20260922/plans/fogbreak-owned-desktop-20261002-01a0fe9a/TARGET-MACHINE-ACCEPTANCE.md",
+    "sha256": "3a77bfa0b0b17236e9223900301e634c6eb97720703f63b7b20b0c01c7604310",
+    "status": "specified_not_executed",
+    "scope": [
+      "World all features",
+      "Golf all features",
+      "Games all features"
+    ],
+    "machine_baseline": {
+      "command": "system_profiler SPHardwareDataType SPDisplaysDataType -json (identity fields excluded)",
+      "model": "Mac mini Mac16,10",
+      "chip": "Apple M4",
+      "cpu": "10 cores: 4 performance, 6 efficiency",
+      "memory": "24 GB",
+      "gpu": "Apple M4; Metal supported",
+      "limitation": "Hardware inventory only, not candidate acceleration/performance evidence"
+    }
+  },
+  "license_clarification": "Official repository identifies MIT; modification/rebranding/distribution permitted with required notices. Lack of white-label config is not a licensing block. Exact-release notice inconsistency remains.",
+  "updated_at": "2026-10-02T22:33:36.930916+00:00",
+  "source_repository": "fogbreak-io/agent-native",
+  "branch_readback_sha": "90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd",
+  "branch_create_command": "gh api --method POST repos/fogbreak-io/agent-native/git/refs ref=refs/heads/fogbreak/desktop-native-273 sha=90d5aaa0c8eb4d4225ad69561b61b45d5dcbc4bd",
+  "branch_create_result": "201-created ref verified by subsequent GET; product source unchanged"
+}
