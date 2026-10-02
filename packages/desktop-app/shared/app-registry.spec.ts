@@ -9,7 +9,7 @@ import {
 
 describe("desktop app visibility", () => {
   it("keeps the primary desktop apps in the requested default order", () => {
-    expect(DESKTOP_DEFAULT_APPS.slice(0, 6).map((app) => app.id)).toEqual([
+    expect(DESKTOP_DEFAULT_APPS.slice(0, 2).map((app) => app.id)).toEqual([
       ...DESKTOP_CHAT_FIRST_DEFAULT_APP_IDS,
     ]);
   });

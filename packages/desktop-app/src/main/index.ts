@@ -183,6 +183,11 @@ import {
   resolveDesktopEnvironmentLane,
   withDesktopEnvironmentLane,
 } from "../../shared/environment-lane";
+import {
+  FOGBREAK_ORIGIN,
+  FOGBREAK_SESSION_PARTITION,
+  desktopAppSessionPartition,
+} from "../../shared/fogbreak.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -344,6 +349,8 @@ import { installWebviewNavigationListeners } from "./webview-navigation";
 import { installWindowDragController } from "./window-drag";
 import { loadDesktopWorkspaceApps } from "./workspace-apps.js";
 
+app.setName("Fogbreak");
+
 initializeDesktopStartup({
   isPackaged: app.isPackaged,
   version: app.getVersion(),
@@ -421,10 +428,7 @@ const desktopReleaseChannelMarker =
 app.userAgentFallback = `${app.userAgentFallback} AgentNativeDesktop/${app.getVersion()}${desktopSsoCanaryMarker}${desktopReleaseChannelMarker}`;
 
 const DEEP_LINK_PROTOCOL = DESKTOP_DEEP_LINK_PROTOCOL;
-const DESKTOP_DEEP_LINK_PROTOCOLS = new Set([
-  "agentnative",
-  "agentnative-nightly",
-]);
+const DESKTOP_DEEP_LINK_PROTOCOLS = new Set(["fogbreak", "fogbreak-nightly"]);
 if (IS_DEV) {
   app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [
     app.getAppPath(),
@@ -833,8 +837,8 @@ function cacheDesktopWorkspaceApps(
   generation: number,
 ): void {
   if (generation !== desktopWorkspaceAppsGeneration) return;
-  if (result.unavailable) return;
-  desktopWorkspaceApps = result.enabled ? result.apps : [];
+  desktopWorkspaceApps =
+    result.enabled && !result.unavailable ? result.apps : [];
 }
 
 function findAppForSourceUrl(sourceUrl: string | undefined): AppConfig | null {
@@ -869,7 +873,7 @@ function getInjectionTargetForAppId(
   return {
     appId: appConfig.id,
     origin: getAppOrigin(appConfig),
-    session: session.fromPartition(`persist:app-${appConfig.id}`),
+    session: session.fromPartition(desktopAppSessionPartition(appConfig)),
   };
 }
 
@@ -2157,6 +2161,11 @@ ipcMain.on(
       return;
     }
     setDesktopActiveAppId(target.appId);
+    const activeContents = target.webContentsId
+      ? webContents.fromId(target.webContentsId)
+      : null;
+    if (activeContents?.getType() === "webview")
+      desktopWebviewAppIds.set(activeContents, target.appId);
     activeWebviewContentsId = target.webContentsId;
     setSentryWebContentsMetadata(target.webContentsId, {
       role: "app-webview",
@@ -13036,7 +13045,7 @@ registerAppsIpc({
       return Promise.resolve(result);
     }
     return loadDesktopWorkspaceApps({
-      identitySession: session.fromPartition(DESKTOP_IDENTITY_PARTITION),
+      identitySession: session.fromPartition(FOGBREAK_SESSION_PARTITION),
       dispatchOrigin,
     }).then((result) => {
       cacheDesktopWorkspaceApps(result, generation);
@@ -14041,7 +14050,7 @@ function installApplicationMenu() {
           { type: "separator" as const },
           {
             label: "Learn More",
-            click: () => void shell.openExternal("https://agent-native.com"),
+            click: () => void shell.openExternal(FOGBREAK_ORIGIN),
           },
           { type: "separator" as const },
           openLogsMenuItem,
@@ -14050,7 +14059,23 @@ function installApplicationMenu() {
 
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [appMenu] : []),
-    { role: "fileMenu" as const },
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Fogbreak",
+          accelerator: "CmdOrCtrl+1",
+          click: () => sendOpenRequestToRenderer({ app: "fogbreak" }),
+        },
+        {
+          label: "Content",
+          accelerator: "CmdOrCtrl+2",
+          click: () => sendOpenRequestToRenderer({ app: "content" }),
+        },
+        { type: "separator" as const },
+        { role: "close" as const },
+      ],
+    },
     { role: "editMenu" as const },
     {
       label: "View",
@@ -14213,7 +14238,7 @@ void app.whenReady().then(async () => {
     configuredSessions.add(sess);
     configurePermissionHandlers(sess, getTargetAppId);
 
-    if (IS_DEV) {
+    if (IS_DEV && sess !== session.fromPartition(FOGBREAK_SESSION_PARTITION)) {
       sess.webRequest.onHeadersReceived((details, callback) => {
         callback({
           responseHeaders: {
@@ -14386,8 +14411,10 @@ void app.whenReady().then(async () => {
   }
   const sessionToAppId = new Map<Electron.Session, string>();
   for (const appConfig of initialApps) {
-    const sess = session.fromPartition(`persist:app-${appConfig.id}`);
-    sessionToAppId.set(sess, appConfig.id);
+    const sess = session.fromPartition(desktopAppSessionPartition(appConfig));
+    if (desktopAppSessionPartition(appConfig) !== FOGBREAK_SESSION_PARTITION) {
+      sessionToAppId.set(sess, appConfig.id);
+    }
     configureWebviewSession(sess, appConfig.id);
   }
 

@@ -45,31 +45,35 @@ describe("resolveDesktopUpdateSupport", () => {
     "0.1.150-desktop-sso-canary",
     "0.1.150-desktop-sso-canary.not-a-run",
     "0.1.150-other-canary.4",
-  ])("preserves normal updater behavior for %s", (version) => {
+  ])("does not enable an unconfigured Fogbreak updater for %s", (version) => {
     expect(resolveDesktopUpdateSupport(true, version)).toEqual({
-      supported: true,
+      supported: false,
+      reason:
+        "Auto-update is unavailable until Fogbreak configures an owned update service",
     });
   });
 
   it("isolates development and SSO canary profiles while leaving Nightly to startup compatibility", () => {
     expect(resolveDesktopUserDataDirectoryName(false, "0.1.150")).toBe(
-      "Agent Native Dev", // agent-native-brand-ok: preserve the legacy Electron profile directory.
+      "Fogbreak Dev", // agent-native-brand-ok: preserve the legacy Electron profile directory.
     );
     expect(
       resolveDesktopUserDataDirectoryName(
         true,
         "0.1.150-desktop-sso-canary.19",
       ),
-    ).toBe("Agent Native SSO Canary"); // agent-native-brand-ok: preserve the legacy Electron profile directory.
-    expect(resolveDesktopUserDataDirectoryName(true, "0.1.150")).toBeNull();
+    ).toBe("Fogbreak SSO Canary"); // agent-native-brand-ok: preserve the legacy Electron profile directory.
+    expect(resolveDesktopUserDataDirectoryName(true, "0.1.150")).toBe(
+      "Fogbreak",
+    );
     expect(
       resolveDesktopUserDataDirectoryName(true, "0.1.150-nightly.296"),
-    ).toBeNull();
+    ).toBe("Fogbreak Nightly");
     expect(
       resolveDesktopUserDataDirectoryName(
         true,
         "0.1.150-desktop-sso-canary.not-a-run",
       ),
-    ).toBeNull();
+    ).toBe("Fogbreak");
   });
 });

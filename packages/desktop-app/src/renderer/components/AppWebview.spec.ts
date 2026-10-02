@@ -13,6 +13,15 @@ import {
   vi,
 } from "vitest";
 
+// Retain upstream generic/SSO regression coverage under its original registry.
+// The owned distribution is exercised with the real registry in App.fogbreak.spec.
+vi.mock("@shared/app-registry", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@shared/app-registry")>();
+  const shared = await import("@agent-native/shared-app-config");
+  return { ...original, DESKTOP_DEFAULT_APPS: shared.DEFAULT_APPS };
+});
+
 import { buildGuestThemeScript } from "../lib/theme.js";
 import {
   APP_WEBVIEW_PREFERENCES,

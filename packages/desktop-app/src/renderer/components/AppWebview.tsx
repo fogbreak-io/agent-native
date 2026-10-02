@@ -419,6 +419,7 @@ interface AppWebviewProps {
   showDesktopIdentityGate?: boolean;
   theme: RendererTheme;
   syncTheme?: boolean;
+  syncAppChatSidebar?: boolean;
   sourceUrl?: string;
   urlOpenNonce?: number;
   urlPath?: string;
@@ -681,6 +682,7 @@ const AppWebview = forwardRef<AppWebviewHandle, AppWebviewProps>(
       showDesktopIdentityGate = true,
       theme,
       syncTheme = true,
+      syncAppChatSidebar = true,
       sourceUrl,
       urlOpenNonce,
       urlPath,
@@ -885,7 +887,7 @@ const AppWebview = forwardRef<AppWebviewHandle, AppWebviewProps>(
     const syncGuestAppChatSidebar = useCallback(
       (force = false) => {
         const wv = webviewRef.current;
-        if (!wv || app.placeholder) return;
+        if (!wv || app.placeholder || !syncAppChatSidebar) return;
         let currentUrl = "";
         try {
           currentUrl = wv.getURL() || wv.src;
@@ -901,7 +903,7 @@ const AppWebview = forwardRef<AppWebviewHandle, AppWebviewProps>(
           buildGuestAppChatSidebarStateScript(open),
         );
       },
-      [app.placeholder, executeGuestScript],
+      [app.placeholder, executeGuestScript, syncAppChatSidebar],
     );
 
     useEffect(() => {

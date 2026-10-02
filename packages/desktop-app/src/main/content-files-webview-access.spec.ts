@@ -60,3 +60,39 @@ describe("contentFilesWebviewDenialReason", () => {
     ).toBeNull();
   });
 });
+
+describe("Fogbreak same-origin file bridge", () => {
+  const fogbreakContent = {
+    ...allowed,
+    senderUrl: "https://fogbreak.io/content/local-files",
+    trustedOrigins: ["https://fogbreak.io"],
+  };
+  it("allows only the genuine active Content webview", () => {
+    expect(contentFilesWebviewDenialReason(fogbreakContent)).toBeNull();
+  });
+  it("does not promote the root app to Content when it navigates to /content", () => {
+    expect(
+      contentFilesWebviewDenialReason({
+        ...fogbreakContent,
+        activeAppId: "fogbreak",
+      }),
+    ).toBe("content-not-active");
+  });
+  it.each([
+    [{ activeWebviewContentsId: undefined }, "sender-not-active-webview"],
+    [{ senderId: 99 }, "sender-not-active-webview"],
+    [
+      { senderUrl: "https://fogbreak.io.evil.example/content" },
+      "untrusted-origin",
+    ],
+    [{ senderUrl: "data:text/html,content" }, "untrusted-origin"],
+    [{ senderUrl: "invalid" }, "invalid-sender-url"],
+  ] as const)(
+    "fails closed for mismatched owned-view evidence",
+    (override, expected) => {
+      expect(
+        contentFilesWebviewDenialReason({ ...fogbreakContent, ...override }),
+      ).toBe(expected);
+    },
+  );
+});
