@@ -17,7 +17,6 @@ import { ActionQueryError } from "../../components/action-query-error";
 import { DispatchChatHomeApps } from "../../components/chat-home-apps";
 import { useDispatchExtensions } from "../../components/layout/Layout";
 import { Skeleton } from "../../components/ui/skeleton";
-import { WorkspaceAppChatFullView } from "../../components/workspace-app-chat-full-view";
 import { submitOverviewPrompt } from "../../lib/overview-chat";
 import { parseWorkspaceAppChatFullViewLocation } from "../../lib/workspace-app-chat-handoff";
 
@@ -251,16 +250,10 @@ export default function ChatRoute() {
     return () => window.clearTimeout(timer);
   }, [agent?.id, agent?.name, agent?.path]);
 
-  // App chat never falls back to the Dispatch global chat: an unparseable
-  // handoff is an explicit unavailable state.
-  if (appChatFullView.kind === "app") {
-    return (
-      <WorkspaceAppChatFullView
-        key={`app-chat:${appChatFullView.handoff.appId.toLowerCase()}`}
-        handoff={appChatFullView.handoff}
-      />
-    );
-  }
+  // App chat never falls back to the Dispatch global chat. A valid handoff is
+  // presented by Layout's workspace app surface, which shows the app's own
+  // live chat controller over this route; an unparseable one is unavailable.
+  if (appChatFullView.kind === "app") return null;
 
   if (appChatFullView.kind === "invalid") {
     return (

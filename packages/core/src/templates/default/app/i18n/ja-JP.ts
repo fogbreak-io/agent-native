@@ -170,6 +170,12 @@ const messages = {
       noWorkspaceAppsDescription:
         "ワークフローに独自の集中した場所が必要な場合は、アプリを作成します。",
       appNotFound: "アプリが見つかりません",
+      appChatUnavailable:
+        "Dispatch が {{name}} のエージェントに接続できなかったため、ここではチャットを利用できません。",
+      appChatThreadUnavailable: "この会話は {{name}} では利用できません。",
+      backToApp: "{{name}} に戻る",
+      askAboutApp: "{{name}} について質問",
+      appChatRetry: "再試行",
       building: "Building",
       appBuildingPrefix: "このアプリは作成中です。で入手可能になります",
       appBuildingSuffix:

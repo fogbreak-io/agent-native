@@ -174,6 +174,12 @@ const messages = {
       noWorkspaceAppsDescription:
         "أنشئ تطبيقًا عندما يحتاج سير العمل إلى مكان خاص به ليعيش فيه.",
       appNotFound: "لم يتم العثور على التطبيق",
+      appChatUnavailable:
+        "تعذّر على Dispatch الاتصال بوكيل {{name}}، لذا فإن الدردشة الخاصة به غير متاحة هنا.",
+      appChatThreadUnavailable: "هذه المحادثة غير متاحة في {{name}}.",
+      backToApp: "العودة إلى {{name}}",
+      askAboutApp: "اسأل عن {{name}}",
+      appChatRetry: "إعادة المحاولة",
       building: "Building",
       appBuildingPrefix: "يتم الآن إنشاء هذا التطبيق. وسوف تكون متاحة في",
       appBuildingSuffix:

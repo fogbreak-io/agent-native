@@ -1088,8 +1088,13 @@ export function MultiTabAssistantChat({
   } = useChatThreads(apiUrl, storageKey, scope, {
     restoreActiveThread,
     browserTabId,
+    // A route-owned thread id is read from props in the same render: a host
+    // that turns route ownership on for a live controller must not expose a
+    // stale `null` for one render, which would start a new draft thread.
     routeThreadId: threadUrlSyncEnabled
-      ? urlThreadId
+      ? threadRouteControlsActiveThread
+        ? (routeThreadId ?? readUrlThreadId(threadUrlParamName))
+        : urlThreadId
       : (activeDeepLinkedThreadId ?? undefined),
     isolateHistoryByScope,
   });

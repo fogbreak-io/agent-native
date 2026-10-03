@@ -12,7 +12,10 @@ import {
   type ResolvedTheme,
 } from "@agent-native/core/client/theme";
 import { withBuilderUtmTrackingParams } from "@agent-native/core/shared/builder-link-tracking";
-import { AgentSidebar } from "@agent-native/toolkit/app/chat/AgentSidebar";
+import {
+  AgentSidebar,
+  type AgentSidebarProps,
+} from "@agent-native/toolkit/app/chat/AgentSidebar";
 import { defaultChatFirstCopy } from "@agent-native/toolkit/app/chat/chat-first-copy";
 import type { ChatFirstCopy } from "@agent-native/toolkit/app/chat/chat-first/types";
 import {
@@ -58,7 +61,10 @@ const EMBED_SESSION_TIMEOUT_MS = 100_000;
 /**
  * How long a rendered iframe may go without a browser `load` event before
  * Native reports `frame-load-failed` / `timeout` for that frame instance. The
- * report is terminal for the attempt: Native does not retry or reset anything.
+ * report is terminal for that frame instance: Native does not retry or reset
+ * anything, and a browser `load` that arrives later is still themed but is
+ * never reported as `frame-loaded` for that `frameInstanceId`. Only a new
+ * frame instance (a new embed session or a retry) can report a load again.
  */
 export const WORKSPACE_APP_FRAME_LOAD_TIMEOUT_MS = 60_000;
 
@@ -154,6 +160,11 @@ export type WorkspaceAppThemeDelivery =
  * is not child readiness, authenticated access, or navigation success.
  * Consumers must ignore events whose `frameInstanceId`/`loadRevision` are
  * older than ones they have already seen.
+ *
+ * `themeDelivery` reports the delivery made with that load. Later
+ * re-deliveries (a theme revision, mode, active or route change) are not
+ * reported as events; one the resolver fails is logged and falls back to
+ * the mode only, exactly as at load.
  */
 export interface WorkspaceAppFrameLifecycleEvent {
   phase: WorkspaceAppFrameLifecyclePhase;
@@ -279,6 +290,13 @@ export interface WorkspaceAppChatRailProps {
    * keeping the children's DOM parent stable so retained frames never reload.
    */
   enabled?: boolean;
+  /**
+   * `"full"` presents this same live chat controller over the whole rail and
+   * hides `children` without unmounting them (see `AgentSidebar`).
+   */
+  presentation?: "sidebar" | "full";
+  /** Route binding for the active thread, used while presented full. */
+  threadUrlSync?: AgentSidebarProps["threadUrlSync"];
 }
 
 export function WorkspaceAppChatRail({
@@ -289,6 +307,8 @@ export function WorkspaceAppChatRail({
   agentPageHref,
   onFullscreenRequest,
   enabled = true,
+  presentation = "sidebar",
+  threadUrlSync,
 }: WorkspaceAppChatRailProps) {
   const t = useT();
   const appChat = useWorkspaceAppChatApi(appId, enabled);
@@ -316,7 +336,9 @@ export function WorkspaceAppChatRail({
       suppressInlineOpenApp
       dynamicSuggestions={false}
       suggestions={[]}
-      emptyStateText={`Ask about ${appName}`}
+      emptyStateText={t("dispatch.pages.askAboutApp", { name: appName })}
+      presentation={presentation}
+      {...(threadUrlSync ? { threadUrlSync } : {})}
       {...(agentPageHref ? { agentPageHref } : {})}
       {...(onFullscreenRequest ? { onFullscreenRequest } : {})}
     >
@@ -330,11 +352,7 @@ export function WorkspaceAppChatRail({
               <IconAlertTriangle className="size-4" />
               <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
                 <span>
-                  {t("dispatch.pages.appChatUnavailable", {
-                    defaultValue:
-                      "Dispatch could not connect to {{name}}'s agent, so its chat is unavailable here.",
-                    name: appName,
-                  })}
+                  {t("dispatch.pages.appChatUnavailable", { name: appName })}
                 </span>
                 <Button
                   type="button"
@@ -487,6 +505,7 @@ export function WorkspaceAppFrame({
     frameWindow.postMessage(resolved.message, resolved.targetOrigin);
     return resolved.delivery;
   }, []);
+  const timedOutGenerationRef = useRef<number | null>(null);
   const handleFrameLoad = useCallback(() => {
     loadRevisionRef.current = {
       generation: loadRevisionRef.current.generation,
@@ -501,6 +520,9 @@ export function WorkspaceAppFrame({
     }
     const themeDelivery = deliverThemeToFrame();
     if (isDirectFallback) setEmbedError(null);
+    if (timedOutGenerationRef.current === loadRevisionRef.current.generation) {
+      return;
+    }
     emitLifecycle("frame-loaded", themeDelivery ? { themeDelivery } : {});
   }, [deliverThemeToFrame, emitLifecycle, isDirectFallback]);
   const workspaceSsoEnabled = useFeatureFlag(DISPATCH_WORKSPACE_SSO_FLAG.key);
@@ -775,6 +797,7 @@ export function WorkspaceAppFrame({
         loadRevisionRef.current.generation === generation &&
         loadRevisionRef.current.value === 0
       ) {
+        timedOutGenerationRef.current = generation;
         emitLifecycle("frame-load-failed", { failure: "timeout" });
       }
     }, WORKSPACE_APP_FRAME_LOAD_TIMEOUT_MS);

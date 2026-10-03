@@ -176,6 +176,13 @@ const messages = {
       noWorkspaceAppsDescription:
         "Créez une application lorsqu'un flux de travail a besoin de son propre espace de vie.",
       appNotFound: "Application introuvable",
+      appChatUnavailable:
+        "Dispatch n’a pas pu se connecter à l’agent de {{name}} ; son chat n’est donc pas disponible ici.",
+      appChatThreadUnavailable:
+        "Cette conversation n’est pas disponible dans {{name}}.",
+      backToApp: "Retour à {{name}}",
+      askAboutApp: "Poser une question sur {{name}}",
+      appChatRetry: "Réessayer",
       building: "Building",
       appBuildingPrefix:
         "Cette application est en cours de création. Il sera disponible à",

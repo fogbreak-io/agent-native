@@ -10,6 +10,10 @@ const railSource = readFileSync(
   new URL("../workspace-app-host.tsx", import.meta.url),
   "utf8",
 );
+const surfaceSource = readFileSync(
+  new URL("../workspace-app-surface.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("Dispatch layout scrolling", () => {
   it("keeps page scrolling inside the viewport with a sticky chat control", () => {
@@ -36,13 +40,9 @@ describe("Dispatch workspace app chat rail", () => {
   });
 
   it("routes the open-app rail through the shared app-chat component", () => {
-    expect(layoutSource).toContain("<WorkspaceAppChatRail");
-    expect(layoutSource).toContain(
-      "enabled={workspaceAppRouteActive && !!workspaceAppChatRegistration}",
-    );
-    expect(layoutSource).toContain(
-      "onFullscreenRequest={openWorkspaceAppChatFullView}",
-    );
+    expect(layoutSource).toContain("<WorkspaceAppSurface");
+    expect(surfaceSource).toContain("<WorkspaceAppChatRail");
+    expect(surfaceSource).toContain("onFullscreenRequest={openFullView}");
     expect(layoutSource).toContain("data-dispatch-workspace-app-frame");
     expect(layoutSource).toContain('new Event("agent-panel:toggle")');
     expect(layoutSource).toContain('new CustomEvent("agent-panel:toggle"');

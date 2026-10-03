@@ -18,6 +18,10 @@ import type {
   DispatchNavItem,
 } from "../components/index.js";
 import {
+  buildWorkspaceAppChatFullViewPath,
+  parseWorkspaceAppChatFullViewLocation,
+} from "../lib/workspace-app-chat-handoff.js";
+import {
   workspaceAppIdFromRoute,
   workspaceAppRoute,
 } from "../lib/workspace-apps.js";
@@ -38,7 +42,10 @@ export interface NavigationState {
   range?: string;
   query?: string;
   runId?: string;
+  /** A Dispatch agent thread. Never set for an app's own chat. */
   threadId?: string;
+  /** The app agent's own thread shown in app-chat full view. */
+  appChatThreadId?: string;
   agentPath?: string;
   usageScope?: "me" | "workspace" | "app";
   usageUserEmail?: string;
@@ -169,6 +176,22 @@ export function buildDispatchNavigationState(
     view: resolveView(pathname, extensions),
     path: appPath(pathname),
   };
+
+  if (state.view === "chat") {
+    // The app-chat full view shows an app's own agent; its thread id must not
+    // read as a Dispatch thread, and a malformed one publishes no thread.
+    const appChat = parseWorkspaceAppChatFullViewLocation(pathname, search);
+    if (appChat.kind === "app") {
+      state.view = "workspace-app-chat";
+      state.workspaceAppId = appChat.handoff.appId;
+      state.workspaceAppPath = appChat.handoff.returnTarget.path;
+      if (appChat.handoff.threadId) {
+        state.appChatThreadId = appChat.handoff.threadId;
+      }
+      return state;
+    }
+    if (appChat.kind === "invalid") return state;
+  }
 
   const threadId = threadIdFromPath(pathname);
   if (threadId) state.threadId = threadId;
@@ -343,7 +366,11 @@ function resolvePath(
   extensions?: DispatchExtensionConfig,
   command?: Pick<
     NavigationState,
-    "extensionId" | "threadId" | "workspaceAppId"
+    | "appChatThreadId"
+    | "extensionId"
+    | "threadId"
+    | "workspaceAppId"
+    | "workspaceAppPath"
   >,
 ): string | undefined {
   switch (view) {
@@ -362,6 +389,18 @@ function resolvePath(
       return command?.workspaceAppId
         ? workspaceAppRoute(command.workspaceAppId)
         : "/apps";
+    case "workspace-app-chat": {
+      const appId = command?.workspaceAppId?.trim();
+      if (!appId) return "/apps";
+      const threadId = command?.appChatThreadId?.trim();
+      return (
+        buildWorkspaceAppChatFullViewPath({
+          appId,
+          ...(threadId ? { threadId } : {}),
+          returnTarget: { appId, path: command?.workspaceAppPath || "/" },
+        }) ?? workspaceAppRoute(appId)
+      );
+    }
     case "operations":
     case "monitoring":
     case "observability":

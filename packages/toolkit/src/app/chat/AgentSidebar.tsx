@@ -288,6 +288,15 @@ export interface AgentSidebarProps {
   thinkingDisplay?: AssistantChatProps["thinkingDisplay"];
   showModelSelector?: AssistantChatProps["showModelSelector"];
   chatOnly?: boolean;
+  /**
+   * `"full"` lays the live chat panel over the whole sidebar shell and hides
+   * `children` without unmounting them. Switching presentation never remounts
+   * the chat controller: the active thread, composer draft, in-flight run,
+   * open tabs, history and voice state are the same in both presentations.
+   * Sidebar-only affordances (collapse, resize, wide drawer, full view) are
+   * withheld while full; the host owns the way back.
+   */
+  presentation?: "sidebar" | "full";
 }
 
 interface HostedHarnessStatus {
@@ -361,6 +370,7 @@ export function AgentSidebar({
   thinkingDisplay,
   showModelSelector,
   chatOnly = true,
+  presentation = "sidebar",
 }: AgentSidebarProps) {
   const resolvedBrowserTabId =
     browserTabId ??
@@ -558,12 +568,13 @@ export function AgentSidebar({
   const [runningTabIds, setRunningTabIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const fullSurface = enabled && presentation === "full";
   const shouldMountPanel =
     enabled &&
     !isPerAppChatHosted &&
     !presentationMode &&
     (!frameCodeMode || !shouldParentFrameOwnAgentPanel()) &&
-    (open || backgroundPanelActive || runningTabIds.size > 0);
+    (fullSurface || open || backgroundPanelActive || runningTabIds.size > 0);
   const shouldMountPanelRef = useRef(shouldMountPanel);
 
   useEffect(() => {
@@ -973,10 +984,11 @@ export function AgentSidebar({
   const handleResizeEnd = useCallback(() => setIsResizing(false), []);
 
   const isLeft = effectivePosition === "left";
-  const wideDrawerEnabled = isWideDrawer && !isMobile;
-  const mobileAnimationEnabled = !presentationMode && isMobile && animateMobile;
+  const wideDrawerEnabled = isWideDrawer && !isMobile && !fullSurface;
+  const mobileAnimationEnabled =
+    !presentationMode && !fullSurface && isMobile && animateMobile;
   const desktopAnimationEnabled =
-    !presentationMode && !isMobile && effectiveAnimateDesktop;
+    !presentationMode && !fullSurface && !isMobile && effectiveAnimateDesktop;
   const sidebarAnimationEnabled =
     mobileAnimationEnabled || desktopAnimationEnabled;
   const [renderAnimatedPanel, setRenderAnimatedPanel] =
@@ -1008,16 +1020,30 @@ export function AgentSidebar({
   const shouldRenderPanel =
     enabled &&
     (sidebarAnimationEnabled ? renderAnimatedPanel : shouldMountPanel);
-  const panelOpen = enabled && open && shouldMountPanel;
-  const panelLayout = isMobile
-    ? "mobile"
-    : wideDrawerEnabled
-      ? "drawer"
-      : "desktop";
-  const showResizeHandle = !isMobile && !wideDrawerEnabled && panelOpen;
+  const panelOpen = enabled && (open || fullSurface) && shouldMountPanel;
+  const panelLayout = fullSurface
+    ? "full"
+    : isMobile
+      ? "mobile"
+      : wideDrawerEnabled
+        ? "drawer"
+        : "desktop";
+  const showResizeHandle =
+    !isMobile && !wideDrawerEnabled && !fullSurface && panelOpen;
 
   let panelStyle: AgentPanelStyle;
-  if (isMobile) {
+  if (fullSurface) {
+    panelStyle = {
+      ...AGENT_PANEL_ROOT_STYLE,
+      "--agent-sidebar-background": "var(--agent-kit-nav-surface)",
+      background: "var(--agent-sidebar-background)",
+      flex: "1 1 auto",
+      width: "100%",
+      minWidth: 0,
+      maxHeight: "var(--agent-native-viewport-height, 100vh)",
+      display: "flex",
+    };
+  } else if (isMobile) {
     panelStyle = {
       ...AGENT_PANEL_ROOT_STYLE,
       position: "fixed",
@@ -1108,6 +1134,7 @@ export function AgentSidebar({
                 : undefined
         }
         data-agent-sidebar-layout={panelLayout}
+        data-agent-sidebar-presentation={presentation}
         data-agent-sidebar-position={effectivePosition}
         data-agent-native-hosted-harness-ui={
           hostedHarnessUi ? "desktop" : undefined
@@ -1161,11 +1188,16 @@ export function AgentSidebar({
             missingApiKeySetupLayout="sidebar"
             defaultMode={defaultMode}
             onCollapse={() => setOpenPersisted(false)}
-            showCollapseButton={showCollapseButton}
-            onSnapTo75Percent={isMobile ? undefined : snapTo75Percent}
-            isWideDrawer={isMobile ? false : isWideDrawer}
-            onExitWideDrawer={isMobile ? undefined : exitWideDrawer}
-            onFullViewRequest={onFullscreenRequest}
+            showCollapseButton={showCollapseButton && !fullSurface}
+            isFullscreen={fullSurface}
+            onSnapTo75Percent={
+              isMobile || fullSurface ? undefined : snapTo75Percent
+            }
+            isWideDrawer={isMobile || fullSurface ? false : isWideDrawer}
+            onExitWideDrawer={
+              isMobile || fullSurface ? undefined : exitWideDrawer
+            }
+            onFullViewRequest={fullSurface ? undefined : onFullscreenRequest}
             onOpenSettings={onOpenSettings}
             onNewCliTab={onNewCliTab}
             onNewUiTab={onNewUiTab}
@@ -1227,6 +1259,7 @@ export function AgentSidebar({
       >
         {/* Mobile backdrop — tapping it closes the sidebar */}
         {isMobile &&
+          !fullSurface &&
           !isPerAppChatHosted &&
           !presentationMode &&
           enabled &&
@@ -1256,6 +1289,9 @@ export function AgentSidebar({
         {isLeft && !presentationMode ? drawerPlaceholder : null}
         <div
           className="agent-sidebar-main-surface flex flex-1 flex-col overflow-auto min-w-0"
+          style={fullSurface ? { display: "none" } : undefined}
+          aria-hidden={fullSurface ? true : undefined}
+          inert={fullSurface ? true : undefined}
           data-agent-sidebar-main-position={effectivePosition}
           data-agent-sidebar-main-state={
             !isMobile && !presentationMode && panelOpen ? "open" : "closed"

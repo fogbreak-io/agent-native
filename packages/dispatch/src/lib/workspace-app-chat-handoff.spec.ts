@@ -163,30 +163,33 @@ describe("resolveWorkspaceAppChatThread", () => {
     );
   });
 
-  it("keeps not-found, forbidden, other-scope and failure distinct", async () => {
-    stubFetch(new Response("", { status: 404 }));
-    await expect(
-      resolveWorkspaceAppChatThread("/p", "mail", "t1"),
-    ).resolves.toEqual({ status: "not-found" });
-
-    stubFetch(new Response("", { status: 403 }));
-    await expect(
-      resolveWorkspaceAppChatThread("/p", "mail", "t1"),
-    ).resolves.toEqual({ status: "forbidden" });
-
+  it("treats the server's single 404 as an opaque not-found", async () => {
+    // The app's agent chat answers missing, unreadable and other-scope
+    // threads with the same 404; the client must not claim to know which.
     stubFetch(
-      new Response(JSON.stringify({ id: "t1", scope: null }), { status: 200 }),
+      new Response(JSON.stringify({ error: "Thread not found" }), {
+        status: 404,
+      }),
     );
     await expect(
       resolveWorkspaceAppChatThread("/p", "mail", "t1"),
-    ).resolves.toEqual({ status: "out-of-scope" });
+    ).resolves.toEqual({ status: "not-found" });
+  });
 
-    stubFetch(new Response("", { status: 502 }));
+  it("reports proxy session and transport failures as retryable, not as thread denial", async () => {
+    for (const status of [401, 403, 502, 503]) {
+      stubFetch(new Response("", { status }));
+      await expect(
+        resolveWorkspaceAppChatThread("/p", "mail", "t1"),
+      ).resolves.toMatchObject({ status: "unavailable" });
+    }
+
+    stubFetch(new Error("offline"));
     await expect(
       resolveWorkspaceAppChatThread("/p", "mail", "t1"),
     ).resolves.toMatchObject({ status: "unavailable" });
 
-    stubFetch(new Error("offline"));
+    stubFetch(new Response(JSON.stringify({ id: "t2" }), { status: 200 }));
     await expect(
       resolveWorkspaceAppChatThread("/p", "mail", "t1"),
     ).resolves.toMatchObject({ status: "unavailable" });

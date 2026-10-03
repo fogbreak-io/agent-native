@@ -6,7 +6,9 @@ import {
 /**
  * Where full-view app chat returns to: the same workspace app at the exact
  * app-local route (path relative to the app mount, with search and hash) that
- * was showing when the handoff started.
+ * was showing when the handoff started. The route is the only location
+ * Dispatch can see; anything finer (an app's own view, selection or draft)
+ * stays with the app and survives because its keep-alive frame is retained.
  */
 export interface WorkspaceAppChatReturnTarget {
   appId: string;
@@ -14,13 +16,14 @@ export interface WorkspaceAppChatReturnTarget {
 }
 
 /**
- * A Dispatch-owned handoff from an app's chat rail to the full-view chat page.
+ * A Dispatch-owned handoff from an app's chat rail to full view.
  *
- * `threadId` is the app agent's own backend thread id — the rail's active
+ * `threadId` is the app agent's own thread id — the rail controller's active
  * thread under the app chat proxy, `dispatch-app-chat:<appId>` storage and the
  * `workspace-app:<appId>` scope — never a Dispatch global thread. It is absent
- * only for a new conversation. The handoff is not a grant: the full-view page
- * re-resolves the app and thread through the normal access checks.
+ * only for a new conversation. The handoff is not a grant: a thread that did
+ * not come from the live controller is re-resolved through the app's own
+ * access check before the controller is pointed at it.
  */
 export interface WorkspaceAppChatHandoff {
   appId: string;
@@ -105,14 +108,15 @@ export function workspaceAppChatReturnRoute(
 export type WorkspaceAppChatThreadResolution =
   | { status: "found" }
   | { status: "not-found" }
-  | { status: "forbidden" }
-  | { status: "out-of-scope" }
   | { status: "unavailable"; error: Error };
 
 /**
  * Resolves an app-chat thread through the app chat proxy, so the app's own
- * access checks decide. `not-found` is distinct from `forbidden`: it is also
- * what an unsaved draft thread returns.
+ * access check decides. The app's agent chat answers a missing thread, one
+ * the user cannot read, and one outside the requested scope with the same
+ * 404, so `not-found` is an opaque denial: it never says which. Proxy session
+ * and transport failures (401 sign-in, 502/503, upstream session expiry) are
+ * `unavailable`, which is retryable and says nothing about the thread.
  */
 export async function resolveWorkspaceAppChatThread(
   apiUrl: string,
@@ -136,33 +140,26 @@ export async function resolveWorkspaceAppChatThread(
     };
   }
   if (response.status === 404) return { status: "not-found" };
-  if (response.status === 401 || response.status === 403) {
-    return { status: "forbidden" };
-  }
   if (!response.ok) {
     return {
       status: "unavailable",
       error: new Error(`Agent chat proxy returned ${response.status}.`),
     };
   }
-  let body: { id?: unknown; scope?: unknown };
+  let body: { id?: unknown };
   try {
-    body = (await response.json()) as { id?: unknown; scope?: unknown };
+    body = (await response.json()) as { id?: unknown };
   } catch (cause) {
     return {
       status: "unavailable",
       error: cause instanceof Error ? cause : new Error(String(cause)),
     };
   }
-  const scope = body.scope as { type?: unknown; id?: unknown } | null;
-  if (
-    body.id !== threadId ||
-    !scope ||
-    scope.type !== "workspace-app" ||
-    typeof scope.id !== "string" ||
-    scope.id.toLowerCase() !== appId.toLowerCase()
-  ) {
-    return { status: "out-of-scope" };
+  if (body.id !== threadId) {
+    return {
+      status: "unavailable",
+      error: new Error("Agent chat proxy returned a different thread."),
+    };
   }
   return { status: "found" };
 }

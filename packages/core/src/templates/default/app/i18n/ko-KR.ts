@@ -167,6 +167,12 @@ const messages = {
       noWorkspaceAppsDescription:
         "워크플로에 집중된 위치가 필요할 때 앱을 만드세요.",
       appNotFound: "앱을 찾을 수 없습니다",
+      appChatUnavailable:
+        "Dispatch가 {{name}}의 에이전트에 연결하지 못해 여기에서 채팅을 사용할 수 없습니다.",
+      appChatThreadUnavailable: "이 대화는 {{name}}에서 사용할 수 없습니다.",
+      backToApp: "{{name}}(으)로 돌아가기",
+      askAboutApp: "{{name}}에 대해 질문하기",
+      appChatRetry: "다시 시도",
       building: "Building",
       appBuildingPrefix: "이 앱을 만드는 중입니다. 다음에서 이용 가능합니다.",
       appBuildingSuffix:

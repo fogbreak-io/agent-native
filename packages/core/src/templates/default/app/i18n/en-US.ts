@@ -170,6 +170,13 @@ const messages = {
       noWorkspaceAppsDescription:
         "Create an app when a workflow needs its own focused place to live.",
       appNotFound: "App not found",
+      appChatUnavailable:
+        "Dispatch could not connect to {{name}}'s agent, so its chat is unavailable here.",
+      appChatThreadUnavailable:
+        "This conversation is not available in {{name}}.",
+      backToApp: "Back to {{name}}",
+      askAboutApp: "Ask about {{name}}",
+      appChatRetry: "Retry",
       building: "Building",
       appBuildingPrefix: "This app is being created. It will be available at",
       appBuildingSuffix:

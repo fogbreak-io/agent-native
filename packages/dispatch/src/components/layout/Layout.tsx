@@ -103,7 +103,6 @@ import { toast } from "sonner";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { cn } from "../../lib/utils";
 import {
-  buildWorkspaceAppChatFullViewPath,
   parseWorkspaceAppChatFullViewLocation,
   type WorkspaceAppChatHandoff,
 } from "../../lib/workspace-app-chat-handoff";
@@ -118,7 +117,6 @@ import {
   workspaceAppIdFromRoute,
   workspaceAppDirectHref,
   workspaceAppDirectLaunchHref,
-  workspaceAppLocalPathFromRoute,
   workspaceAppRoute,
   workspaceAppTargetPath,
   type WorkspaceAppSummary,
@@ -150,11 +148,10 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip";
 import {
-  WorkspaceAppChatRail,
   WorkspaceAppFrame,
-  WorkspaceAppKeepAlive,
   type WorkspaceAppHostExtensions,
 } from "../workspace-app-host";
+import { WorkspaceAppSurface } from "../workspace-app-surface";
 import { Header } from "./Header";
 import {
   HeaderActionsProvider,
@@ -1433,13 +1430,16 @@ function DispatchLayout({
     location.pathname,
     useFeatureFlagState(SETTINGS_REDESIGN_FLAG.key),
   );
-  const isWorkspaceAppChatFullView =
-    isChatRoute &&
-    parseWorkspaceAppChatFullViewLocation(localPathname, location.search)
-      .kind !== "none";
-  const chatFirstSurfaceScope = isWorkspaceAppChatFullView
-    ? "new"
-    : (threadIdFromPath(localPathname) ?? "new");
+  // An app-chat route's thread belongs to the app's own agent, never to the
+  // Dispatch chat surfaces keyed by thread here.
+  const workspaceAppChatRoute = isChatRoute
+    ? parseWorkspaceAppChatFullViewLocation(localPathname, location.search)
+    : ({ kind: "none" } as const);
+  const isWorkspaceAppChatFullView = workspaceAppChatRoute.kind === "app";
+  const chatFirstSurfaceScope =
+    workspaceAppChatRoute.kind !== "none"
+      ? "new"
+      : (threadIdFromPath(localPathname) ?? "new");
   const isWorkspaceAppRoute = shouldAutoCollapseDispatchSidebar(
     location.pathname,
   );
@@ -1451,22 +1451,6 @@ function DispatchLayout({
     isWorkspaceAppRoute &&
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("embedded") === "1";
-  const workspaceAppChildRoutesRef = useRef(new Map<string, string>());
-  const handleWorkspaceAppChildRoute = useCallback(
-    (appId: string, route: string) => {
-      const url = new URL(route, "https://agent-native.invalid");
-      const localPath = workspaceAppLocalPathFromRoute(
-        appId,
-        url.pathname,
-        url.search,
-        url.hash,
-      );
-      if (localPath !== null) {
-        workspaceAppChildRoutesRef.current.set(appId.toLowerCase(), localPath);
-      }
-    },
-    [],
-  );
   const [chatFirstPreference, setChatFirstPreference] = useState(() =>
     readChatFirstMode(),
   );
@@ -2413,41 +2397,11 @@ function DispatchLayout({
       dispatchNavLinkTarget("/chat"),
     );
   }
-  function openWorkspaceAppChatFullView(threadId?: string) {
-    if (!workspaceAppId) return;
-    const appId = workspaceAppId;
-    const returnPath =
-      workspaceAppChildRoutesRef.current.get(appId.toLowerCase()) ??
-      workspaceAppLocalPathFromRoute(
-        appId,
-        localPathname,
-        location.search,
-        location.hash,
-      ) ??
-      "/";
-    const entryThreadId = threadId?.trim() || undefined;
-    const handoff: WorkspaceAppChatHandoff = {
-      appId,
-      ...(entryThreadId ? { threadId: entryThreadId } : {}),
-      returnTarget: { appId, path: returnPath },
-    };
-    const target = buildWorkspaceAppChatFullViewPath(handoff);
-    if (!target) {
-      console.warn(
-        `[dispatch] could not build app chat full view for ${appId}`,
-      );
-      return;
-    }
-    try {
-      extensions?.workspaceApps?.onAppChatFullView?.(Object.freeze(handoff));
-    } catch (cause) {
-      console.warn("[dispatch] onAppChatFullView observer threw", cause);
-    }
-    navigateWithAgentChatViewTransition(
-      navigate,
-      dispatchNavLinkTarget(target),
-      { state: { dispatchAppChatEntry: { threadId: entryThreadId ?? null } } },
-    );
+  function navigateWorkspaceAppSurface(
+    path: string,
+    options?: { replace?: boolean },
+  ) {
+    void navigate(dispatchNavLinkTarget(path), options);
   }
   function openRunThread(threadId: string) {
     void navigate("/chat", {
@@ -2535,50 +2489,33 @@ function DispatchLayout({
       </main>
     </div>
   );
-  const workspaceAppChatRegistration = workspaceAppId
-    ? chatFirstAppRegistrations.find(
-        (app) => app.id.toLowerCase() === workspaceAppId.toLowerCase(),
-      )
-    : undefined;
-  const workspaceAppInitialPath = workspaceAppId
-    ? workspaceAppLocalPathFromRoute(
-        workspaceAppId,
-        localPathname,
-        location.search,
-        location.hash,
-      )
-    : null;
-  // One tree shape on every route: swapping the rail wrapper in and out would
-  // re-parent the keep-alive cache, reloading every retained app frame.
   const workspaceAppContent = (
-    <div
-      data-dispatch-workspace-app-surface
-      className={
-        workspaceAppRouteActive ? "absolute inset-0 overflow-hidden" : "hidden"
+    <WorkspaceAppSurface
+      location={{
+        pathname: localPathname,
+        search: location.search,
+        hash: location.hash,
+      }}
+      routeAppId={workspaceAppRouteActive ? workspaceAppId : null}
+      apps={chatFirstAppRegistrations}
+      appsStatus={
+        chatFirstAppsQuery.isSuccess
+          ? "ready"
+          : chatFirstAppsQuery.isError
+            ? "error"
+            : "loading"
       }
-    >
-      <WorkspaceAppChatRail
-        appId={workspaceAppId ?? ""}
-        appName={workspaceAppChatRegistration?.name ?? workspaceAppId ?? ""}
-        enabled={workspaceAppRouteActive && !!workspaceAppChatRegistration}
-        agentPageHref={agentPageHref}
-        onFullscreenRequest={openWorkspaceAppChatFullView}
-      >
-        <WorkspaceAppKeepAlive
-          activeAppId={workspaceAppRouteActive ? workspaceAppId : null}
-          activeInitialPath={
-            workspaceAppInitialPath && workspaceAppInitialPath !== "/"
-              ? workspaceAppInitialPath
-              : undefined
-          }
-          extensions={extensions?.workspaceApps}
-          onChildRouteChange={handleWorkspaceAppChildRoute}
-        />
-      </WorkspaceAppChatRail>
-    </div>
+      appsErrorMessage={chatFirstCopy("appsLoadError")}
+      onRetryApps={() => void chatFirstAppsQuery.refetch()}
+      extensions={extensions?.workspaceApps}
+      agentPageHref={agentPageHref}
+      navigate={navigateWorkspaceAppSurface}
+    />
   );
   const content = isChatRoute ? (
     <div
+      aria-hidden={isWorkspaceAppChatFullView ? true : undefined}
+      inert={isWorkspaceAppChatFullView ? true : undefined}
       className={cn(
         "agent-layout-main-surface flex h-full min-w-0 flex-1 overflow-hidden",
         chatFirstMode && "dispatch-chat-first-surface",

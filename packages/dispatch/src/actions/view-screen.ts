@@ -137,6 +137,26 @@ export default defineAction({
     const embeddedApp = await resolveEmbeddedApp(navigation);
     if (embeddedApp) screen.embeddedApp = embeddedApp;
 
+    if (navigation?.view === "workspace-app-chat") {
+      screen.chatSurface = {
+        view: "app chat full view",
+        purpose:
+          "The user is talking to this workspace app's own agent, not to Dispatch. Its thread lives in that app; Dispatch threads and tools do not apply to it.",
+        appId:
+          typeof navigation.workspaceAppId === "string"
+            ? navigation.workspaceAppId
+            : undefined,
+        appThreadId:
+          typeof navigation.appChatThreadId === "string"
+            ? navigation.appChatThreadId
+            : undefined,
+        returnPath:
+          typeof navigation.workspaceAppPath === "string"
+            ? navigation.workspaceAppPath
+            : "/",
+      };
+    }
+
     if (navigation?.view === "chat" || navigation?.view === "browser-chat") {
       screen.chatSurface = {
         view:

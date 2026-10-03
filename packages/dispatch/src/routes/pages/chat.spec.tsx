@@ -80,19 +80,6 @@ vi.mock("../../components/layout/Layout", () => ({
   }),
 }));
 
-vi.mock("../../components/workspace-app-chat-full-view", () => ({
-  WorkspaceAppChatFullView: ({
-    handoff,
-  }: {
-    handoff: { appId: string; threadId?: string };
-  }) => (
-    <div
-      data-test-app-chat-full-view={handoff.appId}
-      data-test-app-chat-thread={handoff.threadId ?? ""}
-    />
-  ),
-}));
-
 vi.mock("../../lib/workspace-app-layout", () => ({
   workspaceAppMatchesQuery: (
     app: { name: string; description?: string },
@@ -157,7 +144,7 @@ describe("Dispatch ChatRoute", () => {
     vi.unstubAllGlobals();
   });
 
-  it("routes an app chat handoff to the app's own chat, not Dispatch chat", async () => {
+  it("leaves a valid app chat handoff to Layout's live app controller", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter
@@ -168,10 +155,9 @@ describe("Dispatch ChatRoute", () => {
       );
     });
 
-    const fullView = container.querySelector("[data-test-app-chat-full-view]");
-    expect(fullView?.getAttribute("data-test-app-chat-full-view")).toBe("mail");
-    expect(fullView?.getAttribute("data-test-app-chat-thread")).toBe("t1");
+    // No Dispatch chat (and no second app chat controller) mounts here.
     expect(clientState.surfaceProps).toBeNull();
+    expect(container.innerHTML).toBe("");
   });
 
   it("shows a malformed app chat handoff as unavailable, not global chat", async () => {

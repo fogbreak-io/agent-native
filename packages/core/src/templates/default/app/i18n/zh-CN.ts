@@ -162,6 +162,12 @@ const messages = {
       noWorkspaceAppsDescription:
         "当工作流程需要有自己的集中居住地时，创建一个应用程序。",
       appNotFound: "找不到应用程序",
+      appChatUnavailable:
+        "Dispatch 无法连接到 {{name}} 的智能体，因此此处无法使用其聊天。",
+      appChatThreadUnavailable: "此对话在 {{name}} 中不可用。",
+      backToApp: "返回 {{name}}",
+      askAboutApp: "询问有关 {{name}} 的问题",
+      appChatRetry: "重试",
       building: "Building",
       appBuildingPrefix: "该应用程序正在创建中。它将在",
       appBuildingSuffix:

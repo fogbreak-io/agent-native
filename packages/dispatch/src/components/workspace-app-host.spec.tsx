@@ -1101,7 +1101,7 @@ describe("WorkspaceAppFrame host extensions", () => {
     expect(routeChanges[0]?.identity.path).toBe("/inbox/5");
   });
 
-  it("reports a terminal timeout when the frame never loads, and disposal", async () => {
+  it("keeps a timed-out frame instance terminal through a late load, then reports disposal", async () => {
     vi.useFakeTimers();
     const events: WorkspaceAppFrameLifecycleEvent[] = [];
     await renderFrame({ onFrameLifecycle: (event) => events.push(event) });
@@ -1116,8 +1116,18 @@ describe("WorkspaceAppFrame host extensions", () => {
       identity: { loadRevision: 0 },
     });
     expect(events.some((event) => event.phase === "frame-loaded")).toBe(false);
-
     const frameInstanceId = events.at(-1)?.identity.frameInstanceId;
+
+    // A load that arrives after the timeout is still themed, but the timed
+    // out frame instance stays terminal: it never reports frame-loaded.
+    const { postMessage } = frameWindowSpy();
+    await load();
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: "agent-native-theme-update", theme: "dark", isDark: true },
+      "*",
+    );
+    expect(events.some((event) => event.phase === "frame-loaded")).toBe(false);
+
     act(() => root.unmount());
     root = createRoot(container);
     expect(events.at(-1)).toMatchObject({

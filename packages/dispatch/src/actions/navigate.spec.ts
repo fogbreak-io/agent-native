@@ -29,4 +29,20 @@ describe("dispatch navigate", () => {
       view: "overview",
     });
   });
+
+  it("passes app-chat identity through without calling it a Dispatch thread", async () => {
+    await navigate.run({
+      view: "workspace-app-chat",
+      workspaceAppId: "mail",
+      appChatThreadId: "app-thread-1",
+      workspaceAppPath: "/inbox",
+    });
+
+    expect(mocks.writeAppStateForCurrentTab).toHaveBeenCalledWith("navigate", {
+      view: "workspace-app-chat",
+      workspaceAppId: "mail",
+      appChatThreadId: "app-thread-1",
+      workspaceAppPath: "/inbox",
+    });
+  });
 });

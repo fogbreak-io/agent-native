@@ -164,6 +164,12 @@ const messages = {
       noWorkspaceAppsDescription:
         "जब वर्कफ़्लो को रहने के लिए अपने स्वयं के केंद्रित स्थान की आवश्यकता हो तो एक ऐप बनाएं।",
       appNotFound: "ऐप नहीं मिला",
+      appChatUnavailable:
+        "Dispatch {{name}} के एजेंट से कनेक्ट नहीं कर सका, इसलिए उसकी चैट यहाँ उपलब्ध नहीं है।",
+      appChatThreadUnavailable: "यह बातचीत {{name}} में उपलब्ध नहीं है।",
+      backToApp: "{{name}} पर वापस जाएँ",
+      askAboutApp: "{{name}} के बारे में पूछें",
+      appChatRetry: "फिर से कोशिश करें",
       building: "Building",
       appBuildingPrefix: "यह ऐप बनाया जा रहा है. यह पर उपलब्ध होगा",
       appBuildingSuffix:

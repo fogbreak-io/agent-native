@@ -40,6 +40,38 @@ describe("buildDispatchNavigationState", () => {
     });
   });
 
+  it("publishes an app's own chat context, never a Dispatch thread, in app-chat full view", () => {
+    expect(
+      buildDispatchNavigationState(
+        "/chat/app-thread-1",
+        "?appChat=mail&appReturn=%2Finbox%3Ffilter%3Dunread",
+      ),
+    ).toEqual({
+      view: "workspace-app-chat",
+      path: "/chat/app-thread-1",
+      workspaceAppId: "mail",
+      workspaceAppPath: "/inbox?filter=unread",
+      appChatThreadId: "app-thread-1",
+    });
+  });
+
+  it("publishes no thread at all for a malformed app-chat route", () => {
+    const state = buildDispatchNavigationState(
+      "/chat/app-thread-1",
+      "?appChat=mail&appReturn=%2F%2Fevil.test",
+    );
+    expect(state).toEqual({ view: "chat", path: "/chat/app-thread-1" });
+    expect(state.threadId).toBeUndefined();
+  });
+
+  it("still publishes a Dispatch thread on the plain chat route", () => {
+    expect(buildDispatchNavigationState("/chat/t1")).toEqual({
+      view: "chat",
+      path: "/chat/t1",
+      threadId: "t1",
+    });
+  });
+
   it("keeps the active simple agent on the chat navigation state", () => {
     expect(
       buildDispatchNavigationState(

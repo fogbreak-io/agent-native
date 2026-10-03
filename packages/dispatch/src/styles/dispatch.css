@@ -130,3 +130,10 @@
     min-height: 6.75rem;
   }
 }
+
+/* The workspace app rail sits under Dispatch chrome (and, in app-chat full
+   view, under its back bar), so its sidebar shell fills that box rather than
+   the viewport. */
+.dispatch-workspace-app-surface-rail > .agent-sidebar-shell {
+  height: 100%;
+}
