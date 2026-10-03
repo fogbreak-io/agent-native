@@ -9,6 +9,11 @@ import {
  * was showing when the handoff started. The route is the only location
  * Dispatch can see; anything finer (an app's own view, selection or draft)
  * stays with the app and survives because its keep-alive frame is retained.
+ *
+ * There is deliberately no `view` field: no public signal carries an app's
+ * own view to Dispatch, so Native cannot restore or confirm one. The route
+ * helpers encode only `appId` and `path`; any other property on an object
+ * passed to them is not carried, and returning never reports a restored view.
  */
 export interface WorkspaceAppChatReturnTarget {
   appId: string;
