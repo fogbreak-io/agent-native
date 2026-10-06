@@ -91,6 +91,24 @@ describe("Fogbreak Content IPC authorization", () => {
     expect(deps.chooseContentFilesFolder).toHaveBeenCalledOnce();
     expect(deps.writeContentFilesForRequest).not.toHaveBeenCalled();
   });
+  it("reports a revoked grant as unavailable without selecting a different folder", async () => {
+    const { deps } = setup();
+    expect(
+      await handlers.get(IPC.CONTENT_FILES_GET_FOLDER)!(
+        {},
+        { folderId: "revoked-folder" },
+      ),
+    ).toEqual({
+      ok: false,
+      code: "unavailable",
+      error: "No local folder is linked.",
+    });
+    expect(deps.getContentFilesGrant).toHaveBeenCalledExactlyOnceWith(
+      "revoked-folder",
+    );
+    expect(deps.chooseContentFilesFolder).not.toHaveBeenCalled();
+    expect(deps.readContentFilesForRequest).not.toHaveBeenCalled();
+  });
   it("passes explicit revoke through the same access check", () => {
     const { deps } = setup();
     expect(

@@ -86,7 +86,13 @@ export function registerContentFilesIpc(deps: ContentFilesIpcDeps): void {
       if (denied) return denied;
       const grants = getContentFilesGrants();
       const grant = getContentFilesGrant(request.folderId);
-      if (!grant) return { ok: false, error: "No local folder is linked." };
+      if (!grant) {
+        return {
+          ok: false,
+          code: "unavailable",
+          error: "No local folder is linked.",
+        };
+      }
       return {
         ok: true,
         folder: contentFilesFolderInfo(grant),

@@ -5,7 +5,11 @@ export function buildContentDirectoryPickerBridgeScript(): string {
 
   var bridge =
     window.agentNativeDesktop && window.agentNativeDesktop.contentFiles;
-  if (!bridge || typeof bridge.chooseFolder !== "function") return false;
+  if (
+    !bridge ||
+    typeof bridge.chooseFolder !== "function" ||
+    typeof bridge.getFolder !== "function"
+  ) return false;
 
   function makeError(message, name) {
     try {
@@ -37,7 +41,10 @@ export function buildContentDirectoryPickerBridgeScript(): string {
   }
 
   function folderRequest(folderId) {
-    return folderId ? { folderId: folderId } : undefined;
+    if (typeof folderId !== "string" || !folderId) {
+      throw makeError("Folder access failed.", "InvalidStateError");
+    }
+    return { folderId: folderId };
   }
 
   function actionError(result, fallback) {
@@ -47,11 +54,26 @@ export function buildContentDirectoryPickerBridgeScript(): string {
     );
   }
 
+  function requireBoundFolder(result, folderId) {
+    if (!result.folder || result.folder.id !== folderId) {
+      throw actionError(result, "Folder access failed.");
+    }
+    return result.folder;
+  }
+
+  async function queryHandlePermission() {
+    var result = await bridge.getFolder(folderRequest(this._folderId));
+    if (result && !result.ok && result.code === "unavailable") return "denied";
+    if (!result || !result.ok) throw actionError(result, "Folder access failed.");
+    requireBoundFolder(result, this._folderId);
+    return "granted";
+  }
+
   async function readSources(folderId) {
     var result = await bridge.readFiles(folderRequest(folderId));
     if (!result || !result.ok) throw actionError(result, "Read failed.");
     return {
-      folder: result.folder || {},
+      folder: requireBoundFolder(result, folderId),
       sources: result.sources || {},
       revisions: result.revisions || {},
     };
@@ -114,6 +136,9 @@ export function buildContentDirectoryPickerBridgeScript(): string {
     this._path = filePath;
     this._folderId = folderId;
   }
+
+  DesktopFileHandle.prototype.queryPermission = queryHandlePermission;
+  DesktopFileHandle.prototype.requestPermission = queryHandlePermission;
 
   DesktopFileHandle.prototype.getFile = async function () {
     var read = await readSources(this._folderId);
@@ -253,13 +278,8 @@ export function buildContentDirectoryPickerBridgeScript(): string {
     }
   };
 
-  DesktopDirectoryHandle.prototype.queryPermission = async function () {
-    return "granted";
-  };
-
-  DesktopDirectoryHandle.prototype.requestPermission = async function () {
-    return "granted";
-  };
+  DesktopDirectoryHandle.prototype.queryPermission = queryHandlePermission;
+  DesktopDirectoryHandle.prototype.requestPermission = queryHandlePermission;
 
   DesktopDirectoryHandle.prototype.isSameEntry = async function (other) {
     return Boolean(
@@ -275,7 +295,10 @@ export function buildContentDirectoryPickerBridgeScript(): string {
     if (!result || !result.ok) {
       throw actionError(result, "Folder selection failed.");
     }
-    var folder = result.folder || {};
+    var folder = requireBoundFolder(
+      result,
+      folderRequest(result.folder && result.folder.id).folderId,
+    );
     return new DesktopDirectoryHandle(
       folder.name || "Local folder",
       "",
