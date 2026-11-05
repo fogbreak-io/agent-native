@@ -10,10 +10,14 @@ export const ALLOWED_WEBVIEW_PERMISSIONS = new Set([
 
 /**
  * Web MIDI is for the local Song Studio only (the HEAD TRIP remote and other
- * live controllers). fogbreak.io and every other app stay denied. SysEx is not
- * granted: requestMIDIAccess() without { sysex: true } asks for "midi" alone.
+ * live controllers). fogbreak.io and every other app stay denied.
+ *
+ * The shipped Electron (43.4.0) asks its request handler for "midiSysex" even
+ * when the page calls requestMIDIAccess() without { sysex: true } (main.log
+ * 2026-11-05 12:55:14: check "midi" allowed, request "midiSysex" denied, page got
+ * NotAllowedError). So both are granted, to the Song Studio origin only.
  */
-const SONG_STUDIO_ONLY_WEBVIEW_PERMISSIONS = new Set(["midi"]);
+const SONG_STUDIO_ONLY_WEBVIEW_PERMISSIONS = new Set(["midi", "midiSysex"]);
 
 export function isAllowedWebviewPermission(
   permission: string,

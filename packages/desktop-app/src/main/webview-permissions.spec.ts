@@ -11,8 +11,10 @@ describe("webview permissions", () => {
     expect(isAllowedWebviewPermission("midi")).toBe(false);
   });
 
-  it("does not grant SysEx", () => {
-    expect(isAllowedWebviewPermission("midiSysex", "song-studio")).toBe(false);
+  it("grants SysEx to Song Studio only, because Electron requests it for plain MIDI access", () => {
+    expect(isAllowedWebviewPermission("midiSysex", "song-studio")).toBe(true);
+    expect(isAllowedWebviewPermission("midiSysex", "fogbreak")).toBe(false);
+    expect(isAllowedWebviewPermission("midiSysex", null)).toBe(false);
   });
 
   it("keeps the existing permissions for every app", () => {
