@@ -591,7 +591,7 @@ function withUrlPath(rawUrl: string, path?: string): string {
 
 export function resolveDesktopAppPath(
   app: Pick<AppDefinition, "id">,
-  appConfig?: Pick<AppConfig, "isBuiltIn" | "url">,
+  appConfig?: Pick<AppConfig, "isBuiltIn"> & Partial<Pick<AppConfig, "url">>,
   path?: string,
 ): string | undefined {
   if (path && path !== "/") return path;
