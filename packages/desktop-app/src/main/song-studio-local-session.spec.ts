@@ -57,3 +57,43 @@ describe("song studio local sign-in", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+import { mintSongStudioMcpEntry } from "./song-studio-local-session.js";
+
+describe("song studio MCP entry", () => {
+  it("returns the entry from the connect route", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          mcpServerEntry: {
+            type: "http",
+            url: "http://127.0.0.1:8080/song-studio/mcp",
+            headers: { Authorization: "Bearer test" },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const entry = await mintSongStudioMcpEntry(
+      "an_session=abc",
+      "http://127.0.0.1:8100/song-studio",
+      fetchImpl as never,
+    );
+    expect(entry).toEqual({
+      type: "http",
+      url: "http://127.0.0.1:8080/song-studio/mcp",
+      headers: { Authorization: "Bearer test" },
+    });
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:8100/song-studio/_agent-native/mcp/connect/token",
+    );
+  });
+
+  it("returns null without a session or on a refusal", async () => {
+    expect(await mintSongStudioMcpEntry("")).toBeNull();
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("{}", { status: 401 }));
+    expect(
+      await mintSongStudioMcpEntry("a=b", undefined, fetchImpl as never),
+    ).toBeNull();
+  });
+});

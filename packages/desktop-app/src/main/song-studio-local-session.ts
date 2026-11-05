@@ -123,3 +123,60 @@ export async function signInSongStudioLocally(
     };
   }
 }
+
+export interface SongStudioMcpEntry {
+  type: "http";
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Song Studio's MCP endpoint does not accept the browser session cookie; it
+ * wants the connection entry its own "connect" route hands to a signed-in
+ * user. This asks that route (with the local-dev cookie) for the entry the
+ * Claude and Codex command-line tools should use. The entry carries a
+ * credential, so callers must never log it.
+ */
+export async function mintSongStudioMcpEntry(
+  cookieHeader: string,
+  songStudioUrl: string = FOGBREAK_SONG_STUDIO_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SongStudioMcpEntry | null> {
+  if (!isLoopbackSongStudioUrl(songStudioUrl) || !cookieHeader) return null;
+  const base = new URL(songStudioUrl);
+  const basePath = base.pathname.replace(/\/+$/, "");
+  const target = `${base.origin}${basePath}/_agent-native/mcp/connect/token`;
+  try {
+    const response = await fetchImpl(target, {
+      method: "POST",
+      headers: {
+        Origin: base.origin,
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({ label: "Fogbreak desktop", client: "fogbreak-desktop" }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      mcpServerEntry?: { type?: string; url?: unknown; headers?: unknown };
+    };
+    const entry = payload.mcpServerEntry;
+    if (!entry || entry.type !== "http" || typeof entry.url !== "string") {
+      return null;
+    }
+    const headers: Record<string, string> = {};
+    if (entry.headers && typeof entry.headers === "object") {
+      for (const [key, value] of Object.entries(entry.headers)) {
+        if (typeof value === "string") headers[key] = value;
+      }
+    }
+    return {
+      type: "http",
+      url: entry.url,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    };
+  } catch {
+    return null;
+  }
+}

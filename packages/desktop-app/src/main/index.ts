@@ -190,6 +190,7 @@ import {
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
 import {
+  mintSongStudioMcpEntry,
   signInSongStudioLocally,
 } from "./song-studio-local-session.js";
 import * as AppStore from "./app-store";
@@ -5950,6 +5951,25 @@ async function desktopCodeAgentMcpEnvironment(
     const appMcpUrl = desktopAppMcpUrl(baseUrl);
     const appSession = session.fromPartition(`persist:app-${appConfig.id}`);
     const cookieHeader = await cookieHeaderForRelay(appSession, appMcpUrl);
+    if (appConfig.id === "song-studio") {
+      // Song Studio's MCP wants the connection entry from its own connect route,
+      // not the browser cookie. Fall back to the cookie if it cannot be minted.
+      await ensureSongStudioLocalSession();
+      const songCookies = await cookieHeaderForRelay(appSession, baseUrl);
+      const entry = await mintSongStudioMcpEntry(songCookies, baseUrl);
+      if (entry) {
+        servers[serverId] = {
+          ...entry,
+          description: `${appConfig.name} workspace app tools`,
+        };
+        allowlist.add(serverId);
+        appIds.push(appConfig.id);
+        continue;
+      }
+    } else if (!cookieHeader) {
+      // A hosted fogbreak.io app with no login has no tools to offer.
+      continue;
+    }
     servers[serverId] = {
       type: "http",
       url: appMcpUrl,
@@ -13104,6 +13124,14 @@ registerAppsIpc({
     );
     const dispatchOrigin = dispatch ? getAppOrigin(dispatch) : null;
     if (!dispatchOrigin) {
+      const result = {
+        enabled: false,
+        apps: [],
+      } satisfies DesktopWorkspaceAppListResult;
+      cacheDesktopWorkspaceApps(result, generation);
+      return Promise.resolve(result);
+    }
+    if (!isDesktopSsoEnabled()) {
       const result = {
         enabled: false,
         apps: [],
