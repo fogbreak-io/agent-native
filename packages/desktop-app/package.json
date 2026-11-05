@@ -32,7 +32,7 @@
     "build:fogbreak": "cross-env AGENT_NATIVE_DESKTOP_BUILD_CHANNEL=dev pnpm build",
     "build:fogbreak:mac-assets": "node --import tsx scripts/build-fogbreak-assets.ts && pnpm build:native:mac && pnpm build:chrome-extension",
     "build:fogbreak:mac": "pnpm build:fogbreak:mac-assets && pnpm build:fogbreak && electron-builder --mac --arm64 --config --publish never",
-    "package:fogbreak:dev": "node --import tsx scripts/build-fogbreak-assets.ts && pnpm build:native:mac && pnpm build:chrome-extension && pnpm build:fogbreak && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 --config electron-builder.fogbreak-dev.yml --publish never",
+    "package:fogbreak:dev": "cross-env FOGBREAK_DEV_PACKAGE=1 node --import tsx scripts/build-fogbreak-assets.ts && pnpm build:native:mac && pnpm build:chrome-extension && pnpm build:fogbreak && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 --config electron-builder.fogbreak-dev.yml --publish never",
     "check:fogbreak:closure": "node --import tsx scripts/check-fogbreak-closure.ts"
   },
   "dependencies": {

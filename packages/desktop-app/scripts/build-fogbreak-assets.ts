@@ -57,6 +57,22 @@ execFileSync(
   ["-c", "icns", "-o", path.join(output, "icon.icns"), iconset],
   { stdio: "inherit" },
 );
+// actool ships only with full Xcode. Without it the app still gets icon.icns
+// (iconutil above); only the macOS 26 asset catalog (Assets.car) is skipped.
+const hasActool = (() => {
+  try {
+    execFileSync("xcrun", ["--find", "actool"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+if (!hasActool && process.env.FOGBREAK_DEV_PACKAGE !== "1") {
+  throw new Error("actool (full Xcode) is required for the release asset catalog.");
+}
+if (!hasActool) {
+  console.warn("actool not found (no full Xcode): skipping Assets.car (dev package)");
+} else {
 execFileSync(
   "xcrun",
   [
@@ -75,3 +91,4 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
+}
