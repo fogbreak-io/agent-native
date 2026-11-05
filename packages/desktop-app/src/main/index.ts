@@ -14254,29 +14254,45 @@ function configurePermissionHandlers(
 
   sess.setPermissionCheckHandler(
     (contents, permission, requestingOrigin, details) => {
-      return (
+      const allowed =
         isAllowedWebviewPermission(permission, getTargetAppId()) &&
         isTrustedPermissionRequest(
           contents,
           getTargetAppId(),
           requestingOrigin,
           details,
-        )
-      );
+        );
+      if (permission.startsWith("midi")) {
+        console.info("[permission] check", {
+          permission,
+          appId: getTargetAppId(),
+          origin: requestingOrigin,
+          allowed,
+        });
+      }
+      return allowed;
     },
   );
 
   sess.setPermissionRequestHandler(
     (contents, permission, callback, details) => {
-      callback(
+      const allowed =
         isAllowedWebviewPermission(permission, getTargetAppId()) &&
-          isTrustedPermissionRequest(
-            contents,
-            getTargetAppId(),
-            undefined,
-            details,
-          ),
-      );
+        isTrustedPermissionRequest(
+          contents,
+          getTargetAppId(),
+          undefined,
+          details,
+        );
+      if (permission.startsWith("midi")) {
+        console.info("[permission] request", {
+          permission,
+          appId: getTargetAppId(),
+          url: contents?.getURL?.(),
+          allowed,
+        });
+      }
+      callback(allowed);
     },
   );
 
