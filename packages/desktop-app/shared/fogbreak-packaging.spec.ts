@@ -58,9 +58,9 @@ describe("Fogbreak distribution isolation", () => {
     const end = main.indexOf("registerDesktopChatIpc", start);
     expect(start).toBeGreaterThan(0);
     const loader = main.slice(start, end);
-    expect(loader).toContain("loadDesktopWorkspaceApps({");
+    expect(loader).toContain("loadDesktopWorkspaceApps({ identitySession, dispatchOrigin })");
     expect(loader).toContain(
-      "identitySession: session.fromPartition(FOGBREAK_SESSION_PARTITION)",
+      "const identitySession = session.fromPartition(FOGBREAK_SESSION_PARTITION)",
     );
     expect(loader).not.toContain("DESKTOP_IDENTITY_PARTITION");
   });
