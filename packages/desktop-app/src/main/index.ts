@@ -1921,7 +1921,12 @@ function createWindow(): BrowserWindow {
   desktopDesignPreviewManager?.destroy();
   desktopDesignPreviewManager = new DesktopDesignPreviewManager(win);
 
-  win.once("ready-to-show", () => win.show());
+  win.once("ready-to-show", () => {
+    // Fogbreak: a background launch (probe, login item, automation) must never
+    // take focus from whatever the owner is working in.
+    if (process.env.FOGBREAK_BACKGROUND_LAUNCH === "1") win.showInactive();
+    else win.show();
+  });
   win.webContents.on("will-navigate", (event, url) => {
     if (IS_DEV || isDesktopRendererEntryUrl(url)) return;
     let protocol: string;

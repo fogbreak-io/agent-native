@@ -19,4 +19,8 @@ describe("Fogbreak model picker engines", () => {
   it("never offers Claude models through OpenRouter", () => {
     expect(source).toContain('!model.toLowerCase().startsWith("anthropic/")');
   });
+  it("supports a launch that never takes focus", () => {
+    expect(source).toContain('process.env.FOGBREAK_BACKGROUND_LAUNCH === "1"');
+    expect(source).toContain("win.showInactive()");
+  });
 });
