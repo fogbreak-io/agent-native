@@ -4,13 +4,21 @@ import { DESKTOP_DEFAULT_APPS } from "./app-registry.js";
 import {
   FOGBREAK_ORIGIN,
   FOGBREAK_SESSION_PARTITION,
+  FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
   resolveFogbreakOpenUrl,
 } from "./fogbreak.js";
 
+const byId = (id: string) => {
+  const app = DESKTOP_DEFAULT_APPS.find((candidate) => candidate.id === id);
+  if (!app) throw new Error(`missing default app ${id}`);
+  return app;
+};
+
 describe("Fogbreak hosted composition", () => {
   it("uses the owned hosted entry and one shared partition without vendor SSO", () => {
     expect(DESKTOP_DEFAULT_APPS.map(({ id, url }) => [id, url])).toEqual([
+      ["song-studio", FOGBREAK_SONG_STUDIO_URL],
       ["fogbreak", "https://fogbreak.io/"],
       ["content", "https://fogbreak.io/content"],
       ["dispatch", "https://fogbreak.io/dispatch"],
@@ -18,14 +26,19 @@ describe("Fogbreak hosted composition", () => {
     for (const app of DESKTOP_DEFAULT_APPS) {
       expect(app.mode).toBe("prod");
       expect(app.workspaceSso).toBe(false);
-      expect(desktopAppSessionPartition(app)).toBe(FOGBREAK_SESSION_PARTITION);
+      // Song Studio is the local service on this computer: its own partition.
+      expect(desktopAppSessionPartition(app)).toBe(
+        app.id === "song-studio"
+          ? "persist:app-song-studio"
+          : FOGBREAK_SESSION_PARTITION,
+      );
     }
   });
   it("preserves hosted paths, queries and fragments", () => {
-    expect(resolveFogbreakOpenUrl(DESKTOP_DEFAULT_APPS[0])).toBe(
+    expect(resolveFogbreakOpenUrl(byId("fogbreak"))).toBe(
       `${FOGBREAK_ORIGIN}/`,
     );
-    expect(resolveFogbreakOpenUrl(DESKTOP_DEFAULT_APPS[1])).toBe(
+    expect(resolveFogbreakOpenUrl(byId("content"))).toBe(
       `${FOGBREAK_ORIGIN}/content`,
     );
     for (const path of [
@@ -35,7 +48,7 @@ describe("Fogbreak hosted composition", () => {
       "/golf",
       "/games",
     ]) {
-      expect(resolveFogbreakOpenUrl(DESKTOP_DEFAULT_APPS[0], path)).toBe(
+      expect(resolveFogbreakOpenUrl(byId("fogbreak"), path)).toBe(
         `${FOGBREAK_ORIGIN}${path}`,
       );
     }
@@ -47,7 +60,7 @@ describe("Fogbreak hosted composition", () => {
     "/https:evil.example",
     "/\n/evil.example",
   ])("rejects unsafe open path %s", (path) => {
-    expect(resolveFogbreakOpenUrl(DESKTOP_DEFAULT_APPS[0], path)).toBeNull();
+    expect(resolveFogbreakOpenUrl(byId("fogbreak"), path)).toBeNull();
   });
   it("does not share the owned partition with modified or unrelated apps", () => {
     for (const change of [
@@ -56,7 +69,7 @@ describe("Fogbreak hosted composition", () => {
       { url: "https://name:password@fogbreak.io/" },
       { mode: "dev" as const },
     ]) {
-      const app = { ...DESKTOP_DEFAULT_APPS[0], ...change };
+      const app = { ...byId("fogbreak"), ...change };
       expect(resolveFogbreakOpenUrl(app)).toBeNull();
       expect(desktopAppSessionPartition(app)).not.toBe(
         FOGBREAK_SESSION_PARTITION,
