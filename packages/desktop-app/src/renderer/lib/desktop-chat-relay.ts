@@ -161,12 +161,20 @@ export function installDesktopChatFetchRelay(): void {
       if (activeBases.length === 1) {
         return relayRequest(activeBases[0]![1], requestUrl, input, init);
       }
-      throw new Error(
-        `Unattributed ${requestUrl.pathname} request with ${bases.length} desktop app chat shells mounted (${bases
-          .map(([appId]) => appId)
-          .join(
-            ", ",
-          )}); use useDesktopChatRelayFetch() so the request names its app.`,
+      // Fogbreak: still refuse to guess which app owns the request (no
+      // cross-app leak), but reject the promise instead of throwing
+      // synchronously. A synchronous throw from a passive effect (the
+      // toolkit's agent-sidebar URL sync fires while a second app's shell is
+      // mounting and before it is marked active) crashes the whole shell into
+      // "Something went wrong", including on restart with two restored tabs.
+      return Promise.reject(
+        new Error(
+          `Unattributed ${requestUrl.pathname} request with ${bases.length} desktop app chat shells mounted (${bases
+            .map(([appId]) => appId)
+            .join(
+              ", ",
+            )}); use useDesktopChatRelayFetch() so the request names its app.`,
+        ),
       );
     }
     return relayRequest(bases[0]![1], requestUrl, input, init);
