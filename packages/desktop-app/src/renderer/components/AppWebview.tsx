@@ -13,7 +13,11 @@ import {
   type AppDefinition,
   type AppConfig,
 } from "@shared/app-registry";
-import { fogbreakOwnedAppPath } from "@shared/fogbreak";
+import {
+  FOGBREAK_HOSTED_APP_IDS,
+  FOGBREAK_SESSION_PARTITION,
+  fogbreakOwnedAppPath,
+} from "@shared/fogbreak";
 import {
   IconRefresh,
   IconCopy,
@@ -636,6 +640,9 @@ export function resolveAppWebviewPartition(input: {
 }): string {
   const explicitPartition = input.partitionKey?.trim();
   if (explicitPartition) return explicitPartition;
+  if (!input.sourceUrl?.trim() && FOGBREAK_HOSTED_APP_IDS.has(input.appId)) {
+    return FOGBREAK_SESSION_PARTITION;
+  }
   return input.sourceUrl?.trim()
     ? "persist:chat-first-browser"
     : `persist:app-${input.appId}`;

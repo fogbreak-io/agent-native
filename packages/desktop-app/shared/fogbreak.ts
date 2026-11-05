@@ -70,3 +70,14 @@ export function fogbreakOwnedAppPath(
     return null;
   }
 }
+
+/**
+ * Apps served from fogbreak.io share ONE browser partition so a single sign-in
+ * at the owned workspace covers Fogbreak, Content and Dispatch. (Song Studio is
+ * the local service and keeps its own partition.)
+ */
+export const FOGBREAK_HOSTED_APP_IDS: ReadonlySet<string> = new Set([
+  "fogbreak",
+  "content",
+  "dispatch",
+]);

@@ -1314,6 +1314,17 @@ describe("AppWebview partition selection", () => {
     ).toBe("persist:app-app-1");
   });
 
+  it("shares one partition across the apps served from fogbreak.io", () => {
+    for (const appId of ["fogbreak", "content", "dispatch"]) {
+      expect(resolveAppWebviewPartition({ appId })).toBe(
+        "persist:fogbreak-workspace",
+      );
+    }
+    expect(resolveAppWebviewPartition({ appId: "song-studio" })).toBe(
+      "persist:app-song-studio",
+    );
+  });
+
   it("keeps app tabs on their app-scoped partition", () => {
     expect(
       resolveAppWebviewPartition({
