@@ -24,6 +24,7 @@ const EMPTY_PROVIDER_DRAFTS: Record<CodeAgentProviderCredentialKey, string> = {
   ANTHROPIC_API_KEY: "",
   OPENAI_API_KEY: "",
   GOOGLE_GENERATIVE_AI_API_KEY: "",
+  OPENROUTER_API_KEY: "",
   BUILDER_PRIVATE_KEY: "",
   BUILDER_PUBLIC_KEY: "",
 };
@@ -83,6 +84,17 @@ const CODE_AGENT_PROVIDER_FIELDSETS: Array<{
         key: "GOOGLE_GENERATIVE_AI_API_KEY",
         label: "API key",
         placeholder: "Paste Gemini API key",
+      },
+    ],
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    fields: [
+      {
+        key: "OPENROUTER_API_KEY",
+        label: "API key",
+        placeholder: "Paste OpenRouter API key",
       },
     ],
   },

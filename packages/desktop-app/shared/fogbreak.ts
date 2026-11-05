@@ -1,6 +1,7 @@
 import type { AppConfig } from "@agent-native/shared-app-config";
 
 export const FOGBREAK_ORIGIN = "https://fogbreak.io";
+export const FOGBREAK_SONG_STUDIO_URL = "http://127.0.0.1:8100/song-studio";
 export const FOGBREAK_SESSION_PARTITION = "persist:fogbreak-workspace";
 export const FOGBREAK_APP_ID = "fogbreak";
 

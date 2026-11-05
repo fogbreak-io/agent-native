@@ -499,6 +499,7 @@ const CODE_AGENT_PROVIDER_SETTING_KEYS: CodeAgentProviderCredentialKey[] = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GOOGLE_GENERATIVE_AI_API_KEY",
+  "OPENROUTER_API_KEY",
 ];
 const CODEX_CLI_ENGINE_NAME = "codex-cli";
 const CODEX_CLI_DEFAULT_MODEL = "gpt-6-luna";
@@ -11713,6 +11714,7 @@ function hasRuntimeNonCodexCodeAgentLlmProvider(
   if (env.ANTHROPIC_API_KEY) return true;
   if (env.OPENAI_API_KEY) return true;
   if (env.GOOGLE_GENERATIVE_AI_API_KEY) return true;
+  if (env.OPENROUTER_API_KEY) return true;
   return Boolean(env.BUILDER_PRIVATE_KEY && env.BUILDER_PUBLIC_KEY);
 }
 
@@ -12259,6 +12261,12 @@ async function getCodeAgentModelList(
     const openAiConfigured = Boolean(
       providerStatusById(settings, "openai")?.configured,
     );
+    const googleConfigured = Boolean(
+      providerStatusById(settings, "google")?.configured,
+    );
+    const openRouterConfigured = Boolean(
+      providerStatusById(settings, "openrouter")?.configured,
+    );
     const customEngine = process.env.AGENT_ENGINE?.trim();
     const customModel = process.env.AGENT_MODEL?.trim();
 
@@ -12350,6 +12358,24 @@ async function getCodeAgentModelList(
       engineLabel: "Anthropic",
       supportedModels: ANTHROPIC_MODEL_CONFIG.supportedModels,
       configured: anthropicConfigured,
+    });
+    // Fogbreak: Gemini and OpenRouter use engines the core registry already
+    // ships (ai-sdk:google, ai-sdk:openrouter). Claude models are never offered
+    // through OpenRouter: Claude is only reachable via the user's own
+    // unmodified local `claude` (claude-cli engine above).
+    pushCodeAgentModelOptions(models, {
+      engine: "ai-sdk:google",
+      engineLabel: "Gemini",
+      supportedModels: AI_SDK_MODEL_CONFIG.google.supportedModels,
+      configured: googleConfigured,
+    });
+    pushCodeAgentModelOptions(models, {
+      engine: "ai-sdk:openrouter",
+      engineLabel: "OpenRouter",
+      supportedModels: AI_SDK_MODEL_CONFIG.openrouter.supportedModels.filter(
+        (model) => !model.toLowerCase().startsWith("anthropic/"),
+      ),
+      configured: openRouterConfigured,
     });
 
     const selected = customEngine

@@ -78,6 +78,11 @@ const CODE_AGENT_PROVIDER_DEFINITIONS: Array<{
     label: "Gemini",
     keys: ["GOOGLE_GENERATIVE_AI_API_KEY"],
   },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    keys: ["OPENROUTER_API_KEY"],
+  },
 ];
 
 const CODE_AGENT_PROVIDER_KEYS = CODE_AGENT_PROVIDER_DEFINITIONS.flatMap(

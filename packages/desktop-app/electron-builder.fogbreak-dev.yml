@@ -1,0 +1,18 @@
+# Unsigned local packaging for the owner's own Mac. The release config
+# (electron-builder.yml) keeps forceCodeSigning + notarize untouched; this file
+# only overrides them for a local, unpublished, unsigned build.
+# Use: CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 \
+#        --config electron-builder.fogbreak-dev.yml --publish never
+extends: ./electron-builder.yml
+forceCodeSigning: false
+publish: null
+directories:
+  buildResources: build
+  output: dist-dev
+extraMetadata:
+  # Builder's newest stable desktop release this build is based on (v0.1.289).
+  version: 0.1.289
+mac:
+  identity: null
+  notarize: false
+  hardenedRuntime: false

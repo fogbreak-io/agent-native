@@ -148,12 +148,14 @@ type CodeAgentProviderId =
   | "anthropic"
   | "openai"
   | "google"
+  | "openrouter"
   | "codex";
 
 type CodeAgentProviderCredentialKey =
   | "ANTHROPIC_API_KEY"
   | "OPENAI_API_KEY"
   | "GOOGLE_GENERATIVE_AI_API_KEY"
+  | "OPENROUTER_API_KEY"
   | "BUILDER_PRIVATE_KEY"
   | "BUILDER_PUBLIC_KEY";
 

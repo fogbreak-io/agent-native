@@ -5,7 +5,7 @@ import {
   type AppConfig,
 } from "@agent-native/shared-app-config";
 
-import { FOGBREAK_ORIGIN } from "./fogbreak.js";
+import { FOGBREAK_ORIGIN, FOGBREAK_SONG_STUDIO_URL } from "./fogbreak.js";
 const DESKTOP_HIDDEN_APP_IDS: ReadonlySet<string> = new Set(["dispatch"]);
 const DEFAULT_DESKTOP_TEMPLATE_GATEWAY_URL = "http://127.0.0.1:8080";
 const DESKTOP_APP_ICON_OVERRIDES: Partial<Record<string, string>> = {
@@ -35,6 +35,7 @@ export function getDesktopAppLaunchBehavior(
 }
 
 export const DESKTOP_CHAT_FIRST_DEFAULT_APP_IDS = [
+  "song-studio",
   "fogbreak",
   "content",
 ] as const;
@@ -65,6 +66,21 @@ export function sortDesktopApps<T extends Pick<AppConfig, "id">>(
 }
 
 export const DESKTOP_DEFAULT_APPS: AppConfig[] = [
+  {
+    // Song Studio runs on the same computer (the owner's local Song Studio
+    // service). Loaded directly on its own port: Native's loopback check
+    // rejects the :8080 dev gateway because it adds forwarded headers.
+    id: "song-studio",
+    name: "Song Studio",
+    icon: "Brush",
+    description: "",
+    url: FOGBREAK_SONG_STUDIO_URL,
+    devPort: 0,
+    isBuiltIn: true,
+    enabled: true,
+    mode: "prod",
+    workspaceSso: false,
+  },
   {
     id: "fogbreak",
     name: "Fogbreak",
