@@ -1167,6 +1167,20 @@ describe("Desktop identity gate eligibility", () => {
     ).toBe(true);
   });
 
+  it("never gates the local Song Studio", () => {
+    expect(
+      isDesktopIdentityGateEligible(
+        { id: "song-studio" },
+        {
+          isBuiltIn: true,
+          mode: "prod",
+          url: "http://127.0.0.1:8100/song-studio",
+          workspaceSso: false,
+        },
+      ),
+    ).toBe(false);
+  });
+
   it("does not gate local development apps", () => {
     expect(
       isDesktopIdentityGateEligible(

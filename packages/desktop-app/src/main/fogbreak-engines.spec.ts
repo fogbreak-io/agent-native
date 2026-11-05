@@ -23,4 +23,10 @@ describe("Fogbreak model picker engines", () => {
     expect(source).toContain('process.env.FOGBREAK_BACKGROUND_LAUNCH === "1"');
     expect(source).toContain("win.showInactive()");
   });
+  it("signs in to the local Song Studio and skips the fogbreak.io inventory when logged out", () => {
+    expect(source).toContain("signInSongStudioLocally(");
+    expect(source).toContain("await ensureSongStudioLocalSession();");
+    expect(source).toContain("baseUrl: FOGBREAK_SONG_STUDIO_URL");
+    expect(source).toContain("cookies.length === 0");
+  });
 });

@@ -186,8 +186,12 @@ import {
 import {
   FOGBREAK_ORIGIN,
   FOGBREAK_SESSION_PARTITION,
+  FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
+import {
+  signInSongStudioLocally,
+} from "./song-studio-local-session.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -5847,13 +5851,45 @@ async function resolveDesktopMcpHost(): Promise<{
   baseUrl: string;
   session: Electron.Session;
 } | null> {
-  const appConfig = loadAppsForAuthContext().find(
-    (candidate) => candidate.id === "dispatch" && candidate.enabled !== false,
-  );
-  if (!appConfig) return null;
-  const baseUrl = resolveAppBaseUrl(appConfig);
-  if (!baseUrl) return null;
-  return { baseUrl, session: findRemoteRelaySession(baseUrl) };
+  // Fogbreak desktop manages MCP connections on the local Song Studio, signed in
+  // with the local-dev identity, so no fogbreak.io login is needed.
+  await ensureSongStudioLocalSession();
+  return {
+    baseUrl: FOGBREAK_SONG_STUDIO_URL,
+    session: session.fromPartition("persist:app-song-studio"),
+  };
+}
+
+let songStudioLocalSignInAt = 0;
+let songStudioLocalSignInPending: Promise<void> | null = null;
+const SONG_STUDIO_LOCAL_SIGN_IN_TTL_MS = 10 * 60 * 1000;
+
+function ensureSongStudioLocalSession(force = false): Promise<void> {
+  if (
+    !force &&
+    songStudioLocalSignInAt &&
+    Date.now() - songStudioLocalSignInAt < SONG_STUDIO_LOCAL_SIGN_IN_TTL_MS
+  ) {
+    return Promise.resolve();
+  }
+  if (songStudioLocalSignInPending) return songStudioLocalSignInPending;
+  songStudioLocalSignInPending = signInSongStudioLocally(
+    session.fromPartition("persist:app-song-studio"),
+  )
+    .then((result) => {
+      if (result.ok) {
+        songStudioLocalSignInAt = Date.now();
+        console.info("[song-studio] signed in with the local identity");
+      } else {
+        console.info("[song-studio] local sign-in not available", {
+          reason: result.reason,
+        });
+      }
+    })
+    .finally(() => {
+      songStudioLocalSignInPending = null;
+    });
+  return songStudioLocalSignInPending;
 }
 
 interface DesktopCodeAgentMcpEnvironment {
@@ -13075,10 +13111,17 @@ registerAppsIpc({
       cacheDesktopWorkspaceApps(result, generation);
       return Promise.resolve(result);
     }
-    return loadDesktopWorkspaceApps({
-      identitySession: session.fromPartition(FOGBREAK_SESSION_PARTITION),
-      dispatchOrigin,
-    }).then((result) => {
+    const identitySession = session.fromPartition(FOGBREAK_SESSION_PARTITION);
+    // Without a fogbreak.io login there is nothing to list; skip the request so
+    // the log is not filled with 401s and Song Studio never looks signed out.
+    return identitySession.cookies
+      .get({ url: dispatchOrigin })
+      .then((cookies) =>
+        cookies.length === 0
+          ? ({ enabled: false, apps: [] } satisfies DesktopWorkspaceAppListResult)
+          : loadDesktopWorkspaceApps({ identitySession, dispatchOrigin }),
+      )
+      .then((result) => {
       cacheDesktopWorkspaceApps(result, generation);
       return result;
     });
@@ -14587,6 +14630,7 @@ void app.whenReady().then(async () => {
   initializeMultiFrontierAppIntegrationForRuntime();
   registerDesktopShortcutBindings();
 
+  await ensureSongStudioLocalSession();
   const win = createWindow();
   registerQuickPromptShortcut();
   remoteConnectorEnabled = false;

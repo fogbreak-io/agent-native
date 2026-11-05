@@ -1,0 +1,125 @@
+import type { Session } from "electron";
+
+import { FOGBREAK_SONG_STUDIO_URL } from "../../shared/fogbreak.js";
+
+/**
+ * Song Studio runs on this computer, so the desktop signs the owner in with the
+ * app's own loopback-only "Continue as local dev" route. No account, password or
+ * fogbreak.io login is involved, and nothing here is sent off the machine.
+ */
+export interface ParsedSetCookie {
+  name: string;
+  value: string;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+  expirationDate?: number;
+  sameSite: "unspecified" | "no_restriction" | "lax" | "strict";
+}
+
+export function isLoopbackSongStudioUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" ||
+        url.hostname === "localhost" ||
+        url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function parseSetCookie(
+  header: string,
+  now = Date.now(),
+): ParsedSetCookie | null {
+  const parts = header.split(";").map((part) => part.trim());
+  const [pair, ...attrs] = parts;
+  const eq = pair?.indexOf("=") ?? -1;
+  if (!pair || eq <= 0) return null;
+  const cookie: ParsedSetCookie = {
+    name: pair.slice(0, eq),
+    value: pair.slice(eq + 1),
+    path: "/",
+    httpOnly: false,
+    secure: false,
+    sameSite: "unspecified",
+  };
+  for (const attr of attrs) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = (rawKey ?? "").toLowerCase();
+    const value = rest.join("=");
+    if (key === "path" && value) cookie.path = value;
+    else if (key === "httponly") cookie.httpOnly = true;
+    else if (key === "secure") cookie.secure = true;
+    else if (key === "max-age" && Number.isFinite(Number(value))) {
+      cookie.expirationDate = (now + Number(value) * 1000) / 1000;
+    } else if (key === "expires" && cookie.expirationDate === undefined) {
+      const at = Date.parse(value);
+      if (Number.isFinite(at)) cookie.expirationDate = at / 1000;
+    } else if (key === "samesite") {
+      const lower = value.toLowerCase();
+      if (lower === "lax" || lower === "strict") cookie.sameSite = lower;
+      else if (lower === "none") cookie.sameSite = "no_restriction";
+    }
+  }
+  return cookie;
+}
+
+export type SongStudioLocalSignInResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+/** Signs the given app session into the local Song Studio. Never logs cookie values. */
+export async function signInSongStudioLocally(
+  ses: Pick<Session, "cookies">,
+  songStudioUrl: string = FOGBREAK_SONG_STUDIO_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SongStudioLocalSignInResult> {
+  if (!isLoopbackSongStudioUrl(songStudioUrl)) {
+    return { ok: false, reason: "Song Studio is not a local address." };
+  }
+  const base = new URL(songStudioUrl);
+  const basePath = base.pathname.replace(/\/+$/, "");
+  const target = `${base.origin}${basePath}/_agent-native/auth/local-dev`;
+  try {
+    const response = await fetchImpl(target, {
+      method: "POST",
+      headers: { Origin: base.origin, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) {
+      return { ok: false, reason: `local sign-in answered ${response.status}` };
+    }
+    const headers = response.headers.getSetCookie?.() ?? [];
+    let stored = 0;
+    for (const header of headers) {
+      const cookie = parseSetCookie(header);
+      if (!cookie) continue;
+      await ses.cookies.set({
+        url: base.origin,
+        name: cookie.name,
+        value: cookie.value,
+        path: cookie.path,
+        httpOnly: cookie.httpOnly,
+        secure: false,
+        sameSite: cookie.sameSite === "no_restriction" ? "unspecified" : cookie.sameSite,
+        ...(cookie.expirationDate !== undefined
+          ? { expirationDate: cookie.expirationDate }
+          : {}),
+      });
+      stored += 1;
+    }
+    return stored > 0
+      ? { ok: true }
+      : { ok: false, reason: "local sign-in set no session" };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "unknown error",
+    };
+  }
+}

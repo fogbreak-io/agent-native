@@ -296,6 +296,10 @@ export function isDesktopIdentityGateEligible(
     }
   }
 
+  // A local app (Song Studio on this computer) never uses the shared workspace
+  // sign-in; it has its own local-dev identity.
+  if (canonical && productionOrigin(canonical.url) === null) return false;
+
   if (appConfig?.workspaceSso === true) {
     return productionOrigin(appConfig.url) !== null;
   }
