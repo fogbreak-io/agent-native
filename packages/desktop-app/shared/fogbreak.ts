@@ -46,3 +46,27 @@ export function resolveFogbreakOpenUrl(
   const target = new URL(path, FOGBREAK_ORIGIN);
   return target.origin === FOGBREAK_ORIGIN ? target.toString() : null;
 }
+
+export const FOGBREAK_OWNED_APP_IDS: ReadonlySet<string> = new Set([
+  "song-studio",
+  "fogbreak",
+  "content",
+  "dispatch",
+]);
+
+/**
+ * Stock desktop opens every built-in app at "/home", which replaces the app's
+ * base path. Fogbreak's apps live under their own base paths (Song Studio at
+ * /song-studio, Content at /content), so they open at the configured URL path.
+ */
+export function fogbreakOwnedAppPath(
+  appId: string,
+  url: string | undefined,
+): string | null {
+  if (!FOGBREAK_OWNED_APP_IDS.has(appId) || !url) return null;
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "") || "/";
+  } catch {
+    return null;
+  }
+}

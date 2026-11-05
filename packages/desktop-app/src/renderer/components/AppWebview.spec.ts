@@ -1356,6 +1356,27 @@ describe("AppWebview URL resolution", () => {
     expect(resolveDesktopAppPath({ id: "custom-app" })).toBeUndefined();
   });
 
+  it("opens Fogbreak apps at their own base path instead of /home", () => {
+    expect(
+      resolveDesktopAppPath(
+        { id: "song-studio" },
+        { isBuiltIn: true, url: "http://127.0.0.1:8100/song-studio" },
+      ),
+    ).toBe("/song-studio");
+    expect(
+      resolveDesktopAppPath(
+        { id: "content" },
+        { isBuiltIn: true, url: "https://fogbreak.io/content" },
+      ),
+    ).toBe("/content");
+    expect(
+      resolveDesktopAppPath(
+        { id: "fogbreak" },
+        { isBuiltIn: true, url: "https://fogbreak.io/" },
+      ),
+    ).toBe("/");
+  });
+
   it("uses the production URL by default", () => {
     expect(
       resolveAppWebviewUrl(app, {

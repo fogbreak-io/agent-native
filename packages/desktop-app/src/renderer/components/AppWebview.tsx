@@ -13,6 +13,7 @@ import {
   type AppDefinition,
   type AppConfig,
 } from "@shared/app-registry";
+import { fogbreakOwnedAppPath } from "@shared/fogbreak";
 import {
   IconRefresh,
   IconCopy,
@@ -590,10 +591,12 @@ function withUrlPath(rawUrl: string, path?: string): string {
 
 export function resolveDesktopAppPath(
   app: Pick<AppDefinition, "id">,
-  appConfig?: Pick<AppConfig, "isBuiltIn">,
+  appConfig?: Pick<AppConfig, "isBuiltIn" | "url">,
   path?: string,
 ): string | undefined {
   if (path && path !== "/") return path;
+  const fogbreakPath = fogbreakOwnedAppPath(app.id, appConfig?.url);
+  if (fogbreakPath !== null) return fogbreakPath;
   if (
     appConfig?.isBuiltIn === true ||
     DESKTOP_DEFAULT_APPS.some((candidate) => candidate.id === app.id)
