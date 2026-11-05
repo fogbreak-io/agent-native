@@ -193,6 +193,7 @@ import {
   mintSongStudioMcpEntry,
   signInSongStudioLocally,
 } from "./song-studio-local-session.js";
+import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -2576,19 +2577,6 @@ const multiFrontierQuitGuard = createMultiFrontierQuitGuard({
   onDeferredQuit: requestQuitAfterUpdatePreparation,
 });
 const permissionConfiguredSessions = new WeakSet<Electron.Session>();
-const ALLOWED_WEBVIEW_PERMISSIONS = new Set([
-  "clipboard-read",
-  "clipboard-sanitized-write",
-  "display-capture",
-  "fullscreen",
-  "media",
-  "notifications",
-]);
-
-function isAllowedWebviewPermission(permission: string): boolean {
-  return ALLOWED_WEBVIEW_PERMISSIONS.has(permission);
-}
-
 function originFromUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
@@ -14267,7 +14255,7 @@ function configurePermissionHandlers(
   sess.setPermissionCheckHandler(
     (contents, permission, requestingOrigin, details) => {
       return (
-        isAllowedWebviewPermission(permission) &&
+        isAllowedWebviewPermission(permission, getTargetAppId()) &&
         isTrustedPermissionRequest(
           contents,
           getTargetAppId(),
@@ -14281,7 +14269,7 @@ function configurePermissionHandlers(
   sess.setPermissionRequestHandler(
     (contents, permission, callback, details) => {
       callback(
-        isAllowedWebviewPermission(permission) &&
+        isAllowedWebviewPermission(permission, getTargetAppId()) &&
           isTrustedPermissionRequest(
             contents,
             getTargetAppId(),
