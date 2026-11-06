@@ -8,6 +8,7 @@ import {
   mergeCodeAgentMcpConfig,
   restrictCodeAgentMcpConfig,
 } from "./code-agent-mcp-config.js";
+import type { CodeAgentPermissionMode } from "./code-agent-runs.js";
 
 describe("code-agent MCP config", () => {
   it("accepts the full MCP_SERVERS shape", () => {
@@ -404,7 +405,11 @@ describe("Codex settings carried by an MCP_SERVERS entry", () => {
     }) as NodeJS.ProcessEnv;
 
   it("gives Codex the url, bearer header, a 90 s startup budget and tool approval", () => {
-    expect(codexMcpConfigArgs(null, envWith(songEntry))).toEqual([
+    expect(
+      codexMcpConfigArgs(null, envWith(songEntry), {
+        permissionMode: "full-auto",
+      }),
+    ).toEqual([
       "-c",
       'mcp_servers.desktop_app_song_studio.url="http://127.0.0.1:8100/song-studio/mcp"',
       "-c",
@@ -427,11 +432,28 @@ describe("Codex settings carried by an MCP_SERVERS entry", () => {
 
   it("does not approve tools when the entry says false", () => {
     expect(
-      codexMcpConfigArgs(
-        null,
-        envWith({ ...songEntry, approveTools: false }),
-      ).join("\n"),
+      codexMcpConfigArgs(null, envWith({ ...songEntry, approveTools: false }), {
+        permissionMode: "full-auto",
+      }).join("\n"),
     ).not.toContain("default_tools_approval_mode");
+  });
+
+  it("approves only for the invocation's own write-capable mode", () => {
+    const approves = (permissionMode?: CodeAgentPermissionMode) =>
+      codexMcpConfigArgs(null, envWith(songEntry), { permissionMode }).some(
+        (arg) => arg.includes("default_tools_approval_mode"),
+      );
+    expect(approves("auto-edit")).toBe(true);
+    expect(approves("full-auto")).toBe(true);
+    expect(approves("read-only")).toBe(false);
+    expect(approves("ask-before-edit")).toBe(false);
+    expect(approves(undefined)).toBe(false);
+    // The startup budget is not a permission and is kept in every mode.
+    expect(
+      codexMcpConfigArgs(null, envWith(songEntry), {
+        permissionMode: "read-only",
+      }),
+    ).toContain("mcp_servers.desktop_app_song_studio.startup_timeout_sec=90");
   });
 
   it("rejects a bad setting loudly instead of dropping it", () => {

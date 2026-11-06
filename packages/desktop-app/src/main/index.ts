@@ -263,6 +263,7 @@ import { deriveContentFilesRepositoryIdentity } from "./content-files/local-iden
 import { readCookieHeaderForUrl } from "./cookie-header.js";
 import { DesktopDesignPreviewManager } from "./design-preview-manager";
 import {
+  boundAppIdFromRunMetadata,
   resolveDesktopAppMcpServer,
   type DesktopMcpNotice,
 } from "./desktop-app-mcp-servers.js";
@@ -356,7 +357,7 @@ import {
 } from "./sentry";
 import {
   createSongStudioLocalSession,
-  mintSongStudioMcpEntry,
+  prepareSongStudioMcp,
   signInSongStudioLocally,
   warmSongStudioMcp,
 } from "./song-studio-local-session.js";
@@ -5890,7 +5891,7 @@ interface DesktopCodeAgentMcpEnvironment {
 
 async function desktopCodeAgentMcpEnvironment(
   cwd: string,
-  options: { includeWorkspaceApps?: boolean; permissionMode?: string } = {},
+  options: { includeWorkspaceApps?: boolean; boundAppId?: string } = {},
 ): Promise<DesktopCodeAgentMcpEnvironment> {
   const workspaceRoot = resolveCodeAgentsTerminalCwd({});
   const workspaceConfig = loadMcpConfig(workspaceRoot);
@@ -5943,14 +5944,16 @@ async function desktopCodeAgentMcpEnvironment(
       serverId,
       mcpUrl: appMcpUrl,
       cookieHeader,
-      permissionMode: options.permissionMode ?? "",
+      boundAppId: options.boundAppId,
       songStudio: {
-        baseUrl,
-        readSessionCookies: async () => {
+        prepare: async () => {
           await ensureSongStudioLocalSession();
-          return cookieHeaderForRelay(appSession, baseUrl);
+          return prepareSongStudioMcp({
+            readCookies: () => cookieHeaderForRelay(appSession, baseUrl),
+            songStudioUrl: baseUrl,
+            log: songStudioLog,
+          });
         },
-        mint: mintSongStudioMcpEntry,
       },
     });
     if (resolution.state === "omitted") {
@@ -6173,7 +6176,7 @@ async function spawnCodeAgentRunner(
     });
     const mcpEnvironment = await desktopCodeAgentMcpEnvironment(cwd, {
       includeWorkspaceApps: true,
-      permissionMode: normalizedPermissionMode,
+      boundAppId: boundAppIdFromRunMetadata(runRecord?.metadata),
     });
     for (const notice of mcpEnvironment.notices) {
       appendCodeAgentStatusEvent(runId, notice.message, {
