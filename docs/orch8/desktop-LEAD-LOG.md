@@ -10,7 +10,7 @@ SKILL fogbreak:runtime-aware-agent-work READ whole; fogbreak:fogbreak-build READ
 | id | state |
 |---|---|
 | 15,53,83,93,94,95,97,107 Cloudflare | IN PROGRESS (route diagnosis above) |
-| 20,22,25,26,108 Control Room live in Chrome | IN PROGRESS: new private artifact https://claude.ai/artifact/4sDbgNxAHmRM2AEX4QJaXj built (source /home/user/agent-native/docs/orch8/control-room/control-room.html, commit f8a22161); reviewer a91d422f84f9d0bd8 returned REQUEST CHANGES at f8a22161 (clock-skew shown fresh, UI rebuilt every 10s, Live badge not age-driven, absent vs unreadable snapshot); fixes at 3c443452 (file sha256 57b35382...1163, artifact v2); fresh reviewer ae051f7e6615a95a4 running. UNPROVEN: live connector never run in a real viewer; owner view untested |
+| 20,22,25,26,108 Control Room live in Chrome | PR https://github.com/fogbreak-io/agent-native/pull/1 (head claude/orch8-desktop-control-room f8133808; file sha256 f8a754be...b420, artifact v3). Independent review: Verdict: APPROVE at b015105584cb4c7fa9e78e5debc90705f2f64264 (same file hash). UNPROVEN: live connector run in a real viewer, owner view, plain Chrome; per-session iframe not allowed by artifact contract |
 | 46 Claude panel/orchestrator inside Fogbreak.app | IN PROGRESS: Claude sign-in/panel fix on branch claude/orch8-desktop-claude-panel @ b859863c (base 1910aa68, 10 files, packages/desktop-app only); reviewer a6c1914ba41cfb221 running; no PR yet. Orchestrator panel itself NOT built (no evidence it exists). CLI-only, owner view untested |
 
 ## Findings 2026-11-06 ~07:10Z
@@ -42,3 +42,11 @@ Squashed WIP checkpoints into one clean commit b859863c on claude/orch8-desktop-
 
 ## Cloudflare: next owner
 Orchestrator #8 (Mac Desktop profile has the working Cloudflare MCP): read account via MCP and deploy Song's PR #284 preview from there. Not buildable from this cloud checkout (PR #284 is not in this repo).
+
+## Control Room review history
+- f8a22161 REQUEST CHANGES (clock skew fresh, UI rebuilt per poll, badge not age-driven, absent vs unreadable snapshot, truncation).
+- 3c443452 REQUEST CHANGES (approve button stuck, messages kept after revoke, working count ignores age).
+- b0151055 Verdict: APPROVE at b015105584cb4c7fa9e78e5debc90705f2f64264 (reviewer abb7098dab14000c9). Non-blocking follow-up M1: list_events policy denial retracts whole feed (loud, not false-fresh); L1 duplicate ids; L3 error flicker.
+
+## Claude panel review history
+- b859863c REQUEST CHANGES (reviewer a6c1914ba41cfb221): HIGH signed-out Codex read 'Not installed'; MEDIUM untested main mapping, removed default guard untested, failures invisible in non-empty thread, raw English copy (owner decision). Fix round running in lane aa511f22252c93318; no PR yet.
