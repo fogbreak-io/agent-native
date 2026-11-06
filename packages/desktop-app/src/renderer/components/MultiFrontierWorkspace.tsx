@@ -1016,7 +1016,8 @@ function ConnectionBadge({ status }: { status?: SubscriptionStatus }) {
   const connected = status?.connectionState === "connected";
   const text = connected
     ? "Connected"
-    : status?.connectionState === "needs-sign-in"
+    : status?.connectionState === "needs-sign-in" ||
+        status?.connectionState === "no-subscription"
       ? "Sign in"
       : "Unavailable";
   return (

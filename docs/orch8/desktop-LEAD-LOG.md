@@ -50,3 +50,8 @@ Orchestrator #8 (Mac Desktop profile has the working Cloudflare MCP): read accou
 
 ## Claude panel review history
 - b859863c REQUEST CHANGES (reviewer a6c1914ba41cfb221): HIGH signed-out Codex read 'Not installed'; MEDIUM untested main mapping, removed default guard untested, failures invisible in non-empty thread, raw English copy (owner decision). Fix round running in lane aa511f22252c93318; no PR yet.
+
+## Order from Desktop session (orchestrator #8 family), answered 2026-11-06 ~08:3xZ
+STATE: claude-panel fix round 4 running in lane aa511f22252c93318 (round 3 head 7f9d9162 was rejected by 4th reviewer: Settings row + isClaudeSubscriptionStatus still 'Connected' for logins the runner rejects; index.ts wiring untested). No final head yet, no PR yet, no APPROVE yet.
+NEXT: when the lane returns -> re-cut claude/orch8-desktop-claude-panel (final head) -> 5th independent review at that sha -> open PR to fogbreak/desktop-current with FAILED/UNPROVEN first (PR may open before APPROVE; merge waits for it).
+CLOUD MAC BUILD: NOT STARTED, depends on the final head. Facts: .github/workflows/desktop-release.yml build-mac runs on macos-latest but uses `--publish always` (publishes to the release channel) so I will NOT dispatch it; the earlier Fogbreak cloud handoff built on Linux only (typecheck/test/build, 'Mac assets BLOCKED by missing approved icon'). A real Mac app needs a macOS runner or a Linux electron-builder --mac --dir attempt; will report artifact path+hash or the exact blocker.

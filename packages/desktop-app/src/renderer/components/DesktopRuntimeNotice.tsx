@@ -14,6 +14,9 @@ export interface DesktopRuntimeNoticeProps {
   signIn: ClaudeSignInState;
   onSignIn: () => void;
   onRetry: () => void;
+  /** The model list could not be read: offer the same re-check as after a failed sign-in look. */
+  canRetry: boolean;
+  retryBusy: boolean;
 }
 
 /** Plain-words Claude Code state with one sign-in button, shown above the composer so it stays visible once the thread has messages. */
@@ -23,6 +26,8 @@ export default function DesktopRuntimeNotice({
   signIn,
   onSignIn,
   onRetry,
+  canRetry,
+  retryBusy,
 }: DesktopRuntimeNoticeProps) {
   const text =
     signIn.status === "failed"
@@ -35,23 +40,32 @@ export default function DesktopRuntimeNotice({
             ? "Fogbreak couldn't re-check the Claude sign-in. Try again, or switch back here and it will look again."
             : message;
   if (!text) return null;
+  const retry = canRetry || signIn.status === "recheck-failed";
   return (
     <div
       role={signIn.status === "failed" ? "alert" : "status"}
       className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
     >
       <p className="min-w-0 flex-1">{text}</p>
-      {canSignIn || signIn.status === "recheck-failed" ? (
+      {retry ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          disabled={retryBusy}
+          onClick={onRetry}
+        >
+          Try again
+        </Button>
+      ) : canSignIn ? (
         <Button
           size="sm"
           variant="outline"
           className="shrink-0"
           disabled={signIn.status === "opening"}
-          onClick={signIn.status === "recheck-failed" ? onRetry : onSignIn}
+          onClick={onSignIn}
         >
-          {signIn.status === "recheck-failed"
-            ? "Try again"
-            : "Sign in to Claude"}
+          Sign in to Claude
         </Button>
       ) : null}
     </div>

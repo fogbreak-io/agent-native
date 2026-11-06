@@ -430,7 +430,9 @@ function status(
     providerId,
     connectionState,
     ...(connectionState === "connected"
-      ? { authMethod: providerId === "codex" ? "ChatGPT" : "Claude.ai" }
+      ? providerId === "codex"
+        ? { authMethod: "ChatGPT" }
+        : { authMethod: "claude.ai", plan: { type: "max" } }
       : {}),
     telemetry: {
       state: "unavailable",

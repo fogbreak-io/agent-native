@@ -4,10 +4,13 @@ import type {
   CodeAgentModelOption,
   CodeAgentRuntimeState,
 } from "../../shared/ipc-channels.js";
-import type {
-  SubscriptionStatus,
-  SubscriptionTelemetry,
+import {
+  isClaudeSubscriptionAuthMethod,
+  type SubscriptionStatus,
+  type SubscriptionTelemetry,
 } from "../../shared/subscription-status.js";
+
+export { isClaudeSubscriptionAuthMethod };
 import {
   resolveExecutable,
   withResolvedExecutablePaths,
@@ -105,7 +108,8 @@ export async function readClaudeSubscriptionStatus(
 /**
  * Turns one `claude auth status --json` run into a connection status. The CLI
  * exits 1 when signed out and still prints `{"loggedIn": false}`, so the exit
- * code alone cannot tell "signed out" from "could not run".
+ * code alone cannot tell "signed out" from "could not run". "connected" means
+ * `claudeRunnerAcceptsLogin`: a login the runner rejects is "no-subscription".
  */
 export function interpretClaudeAuthStatus(
   result: ClaudeProcessResult,
@@ -153,23 +157,26 @@ export function interpretClaudeAuthStatus(
       telemetry: connectionOnlyTelemetry(false),
     };
   }
-  const subscription = isClaudeSubscriptionAuthMethod(authMethod);
-  const planType = subscription ? stringValue(raw.subscriptionType) : undefined;
+  if (!claudeRunnerAcceptsLogin(raw)) {
+    return {
+      schemaVersion: 1,
+      providerId: "claude",
+      connectionState: "no-subscription",
+      authMethod,
+      connectionMessage: isClaudeSubscriptionAuthMethod(authMethod)
+        ? "Claude is signed in, but not with a Claude subscription plan Fogbreak can use."
+        : "Claude Code is signed in with an API key or console login, not a Claude subscription.",
+      telemetry: connectionOnlyTelemetry(false),
+    };
+  }
+  const planType = stringValue(raw.subscriptionType);
   return {
     schemaVersion: 1,
     providerId: "claude",
     connectionState: "connected",
     authMethod,
     ...(planType ? { plan: { type: planType } } : {}),
-    ...(!subscription
-      ? {
-          connectionMessage:
-            "Claude Code is authenticated with API or console billing, not a Claude subscription.",
-        }
-      : {}),
-    telemetry: subscription
-      ? claudeLiveUsageUnsupportedTelemetry(Boolean(planType))
-      : connectionOnlyTelemetry(false),
+    telemetry: claudeLiveUsageUnsupportedTelemetry(Boolean(planType)),
   };
 }
 
@@ -192,8 +199,9 @@ export interface LocalClaudeCliProbe {
 /**
  * Classifies the local `claude` CLI for the app chat model list from its
  * `--version` and `auth status --json` runs. The sign-in answer comes from
- * `interpretClaudeAuthStatus`, so this and the Settings subscription row
- * cannot disagree about what counts as signed in.
+ * `interpretClaudeAuthStatus`, which gates "connected" on
+ * `claudeRunnerAcceptsLogin`, so this, the Settings subscription row and the
+ * Multi-Frontier gate cannot disagree about what counts as signed in.
  */
 export function classifyLocalClaudeCli(
   version: ClaudeCliProbeRun,
@@ -221,30 +229,20 @@ export function classifyLocalClaudeCli(
     ...(status.error?.code ? { spawnErrorCode: status.error.code } : {}),
   });
   if (connection.connectionState === "connected") {
-    const raw = parseAuthStatus(status.stdout);
-    if (raw && claudeRunnerAcceptsLogin(raw)) {
-      return {
-        available: true,
-        authenticated: true,
-        runtimeState: "signed-in",
-      };
-    }
-    return {
-      available: true,
-      authenticated: false,
-      runtimeState: isClaudeSubscriptionAuthMethod(connection.authMethod)
-        ? "no-plan"
-        : "not-subscription",
-      error: "Claude Code is not signed in with a Claude subscription.",
-    };
+    return { available: true, authenticated: true, runtimeState: "signed-in" };
   }
+  const runtimeState: CodeAgentRuntimeState =
+    connection.connectionState === "needs-sign-in"
+      ? "needs-sign-in"
+      : connection.connectionState === "no-subscription"
+        ? isClaudeSubscriptionAuthMethod(connection.authMethod)
+          ? "no-plan"
+          : "not-subscription"
+        : "unreadable";
   return {
     available: true,
     authenticated: false,
-    runtimeState:
-      connection.connectionState === "needs-sign-in"
-        ? "needs-sign-in"
-        : "unreadable",
+    runtimeState,
     error: "Claude Code is not signed in with a Claude subscription.",
   };
 }
@@ -273,6 +271,26 @@ export async function probeLocalClaudeCliAsync(
   );
 }
 
+export interface LocalClaudeCliStatus extends LocalClaudeCliProbe {
+  label: string;
+}
+
+/** What `getLocalClaudeCliStatus` caches in Electron main: the probe plus its display label. */
+export function readLocalClaudeCliStatus(
+  run: (args: readonly string[]) => ClaudeCliProbeRun,
+): LocalClaudeCliStatus {
+  return { ...probeLocalClaudeCli(run), label: "Claude subscription" };
+}
+
+export async function readLocalClaudeCliStatusAsync(
+  run: (args: readonly string[]) => Promise<ClaudeCliProbeRun>,
+): Promise<LocalClaudeCliStatus> {
+  return {
+    ...(await probeLocalClaudeCliAsync(run)),
+    label: "Claude subscription",
+  };
+}
+
 /**
  * The login the code-agent runner accepts before a run. Mirrors
  * `assertClaudeCodeSubscription` in packages/core/src/cli/claude-code-participant.ts
@@ -284,8 +302,8 @@ export function claudeRunnerAcceptsLogin(
 ): boolean {
   return (
     raw.loggedIn === true &&
-    raw.authMethod === "claude.ai" &&
-    raw.apiProvider === "firstParty" &&
+    stringValue(raw.authMethod) === "claude.ai" &&
+    stringValue(raw.apiProvider) === "firstParty" &&
     Boolean(stringValue(raw.subscriptionType))
   );
 }
@@ -319,7 +337,8 @@ export function isClaudeSubscriptionStatus(
   return (
     status.providerId === "claude" &&
     status.connectionState === "connected" &&
-    isClaudeSubscriptionAuthMethod(status.authMethod)
+    status.authMethod === "claude.ai" &&
+    Boolean(status.plan?.type)
   );
 }
 
@@ -406,12 +425,6 @@ function claudeLiveUsageUnsupportedTelemetry(
         "Claude Code does not expose live plan usage to non-interactive sessions.",
     },
   };
-}
-
-export function isClaudeSubscriptionAuthMethod(
-  authMethod: string | undefined,
-): boolean {
-  return authMethod?.toLowerCase().replaceAll(/[^a-z]/g, "") === "claudeai";
 }
 
 function parseAuthStatus(value: string): Record<string, unknown> | null {

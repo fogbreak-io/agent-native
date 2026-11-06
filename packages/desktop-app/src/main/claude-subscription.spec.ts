@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { SubscriptionStatus } from "../../shared/subscription-status.js";
 import {
   DEFAULT_CLAUDE_AUTH_STATUS_TIMEOUT_MS,
   claudeCliModelOptions,
@@ -11,6 +12,8 @@ import {
   classifyLocalClaudeCli,
   probeLocalClaudeCli,
   probeLocalClaudeCliAsync,
+  readLocalClaudeCliStatus,
+  readLocalClaudeCliStatusAsync,
   executeClaudeProcess,
   getClaudeSubscriptionLoginLaunchSpec,
   isClaudeSubscriptionStatus,
@@ -26,6 +29,7 @@ describe("readClaudeSubscriptionStatus", () => {
       stdout: JSON.stringify({
         loggedIn: true,
         authMethod: "claude.ai",
+        apiProvider: "firstParty",
         email: "person@example.test",
         orgId: "org-example",
         orgName: "Example Org",
@@ -97,24 +101,105 @@ describe("readClaudeSubscriptionStatus", () => {
     });
   });
 
-  it("does not advertise plan capability when Claude omits the plan tier", async () => {
-    const status = await readClaudeSubscriptionStatus({
-      execute: async () => ({
+  const accepted = {
+    loggedIn: true,
+    authMethod: "claude.ai",
+    apiProvider: "firstParty",
+    subscriptionType: "pro",
+  };
+
+  it.each([
+    {
+      name: "missing subscriptionType",
+      patch: { subscriptionType: undefined },
+    },
+    { name: "null subscriptionType", patch: { subscriptionType: null } },
+    { name: "blank subscriptionType", patch: { subscriptionType: "  " } },
+    { name: "non-string subscriptionType", patch: { subscriptionType: 3 } },
+    { name: "missing apiProvider", patch: { apiProvider: undefined } },
+    { name: "third-party apiProvider", patch: { apiProvider: "bedrock" } },
+    { name: "authMethod Claude.AI", patch: { authMethod: "Claude.AI" } },
+    { name: "authMethod claude_ai", patch: { authMethod: "claude_ai" } },
+    { name: "authMethod api_key", patch: { authMethod: "api_key" } },
+    { name: "authMethod console", patch: { authMethod: "console" } },
+    { name: "missing authMethod", patch: { authMethod: undefined } },
+  ])(
+    "does not report a login the runner rejects as connected ($name)",
+    async ({ patch }) => {
+      const execute: ClaudeProcessExecutor = async () => ({
         exitCode: 0,
-        stdout: JSON.stringify({
-          loggedIn: true,
-          authMethod: "claude.ai",
-        }),
+        stdout: JSON.stringify({ ...accepted, ...patch }),
         stderr: "",
+      });
+
+      const status = await readClaudeSubscriptionStatus({ execute });
+
+      expect(status).toMatchObject({
+        connectionState: "no-subscription",
+        telemetry: { source: "connection-only" },
+      });
+      expect(status.connectionMessage).toBeTruthy();
+      expect(status).not.toHaveProperty("plan");
+      expect(isClaudeSubscriptionStatus(status)).toBe(false);
+    },
+  );
+
+  it("accepts the login the runner accepts, trimming the way core does", async () => {
+    const execute: ClaudeProcessExecutor = async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        ...accepted,
+        authMethod: " claude.ai ",
+        apiProvider: " firstParty",
+        subscriptionType: " pro ",
       }),
+      stderr: "",
     });
 
-    expect(status.telemetry).toMatchObject({
-      state: "unsupported",
-      capabilities: { account: false, plan: false },
+    const status = await readClaudeSubscriptionStatus({ execute });
+
+    expect(status).toMatchObject({
+      connectionState: "connected",
+      authMethod: "claude.ai",
+      plan: { type: "pro" },
     });
-    expect(status).not.toHaveProperty("account");
-    expect(status).not.toHaveProperty("plan");
+    expect(isClaudeSubscriptionStatus(status)).toBe(true);
+  });
+
+  it("isClaudeSubscriptionStatus rejects a connected status that lacks what the runner needs", () => {
+    const base: SubscriptionStatus = {
+      schemaVersion: 1,
+      providerId: "claude",
+      connectionState: "connected",
+      authMethod: "claude.ai",
+      plan: { type: "pro" },
+      telemetry: {
+        state: "unsupported",
+        source: "connection-only",
+        capabilities: {
+          account: false,
+          plan: true,
+          rateLimits: false,
+          modelTierRateLimits: false,
+          contextWindow: false,
+          credits: false,
+          liveUpdates: false,
+        },
+        meters: [],
+      },
+    };
+    expect(isClaudeSubscriptionStatus(base)).toBe(true);
+    expect(
+      isClaudeSubscriptionStatus({ ...base, authMethod: "Claude.ai" }),
+    ).toBe(false);
+    expect(isClaudeSubscriptionStatus({ ...base, authMethod: "api_key" })).toBe(
+      false,
+    );
+    const { plan: _plan, ...noPlan } = base;
+    expect(isClaudeSubscriptionStatus(noPlan)).toBe(false);
+    expect(isClaudeSubscriptionStatus({ ...base, plan: { type: "" } })).toBe(
+      false,
+    );
   });
 
   it("reads the signed-out answer the real CLI gives, which exits 1 with JSON on stdout", async () => {
@@ -228,7 +313,7 @@ describe("readClaudeSubscriptionStatus", () => {
     });
   });
 
-  it("does not treat API or console authentication as a Claude subscription", async () => {
+  it("labels API or console authentication as not a Claude subscription, in words", async () => {
     const execute: ClaudeProcessExecutor = async () => ({
       exitCode: 0,
       stdout: JSON.stringify({
@@ -245,10 +330,10 @@ describe("readClaudeSubscriptionStatus", () => {
     const status = await readClaudeSubscriptionStatus({ execute });
 
     expect(status).toMatchObject({
-      connectionState: "connected",
+      connectionState: "no-subscription",
       authMethod: "api_key",
       connectionMessage:
-        "Claude Code is authenticated with API or console billing, not a Claude subscription.",
+        "Claude Code is signed in with an API key or console login, not a Claude subscription.",
       telemetry: {
         source: "connection-only",
         capabilities: { account: false, plan: false },
@@ -257,6 +342,22 @@ describe("readClaudeSubscriptionStatus", () => {
     expect(status.plan).toBeUndefined();
     expect(status).not.toHaveProperty("account");
     expect(isClaudeSubscriptionStatus(status)).toBe(false);
+  });
+
+  it("says a claude.ai login without a usable plan is not a plan Fogbreak can use", async () => {
+    const execute: ClaudeProcessExecutor = async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+      stderr: "",
+    });
+
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
+      connectionState: "no-subscription",
+      connectionMessage:
+        "Claude is signed in, but not with a Claude subscription plan Fogbreak can use.",
+    });
   });
 });
 
@@ -590,6 +691,13 @@ describe("claudeRunnerAcceptsLogin", () => {
 
   it("accepts only a signed-in first-party claude.ai login with a plan", () => {
     expect(claudeRunnerAcceptsLogin(ok)).toBe(true);
+    expect(
+      claudeRunnerAcceptsLogin({
+        ...ok,
+        authMethod: " claude.ai ",
+        apiProvider: " firstParty",
+      }),
+    ).toBe(true);
     expect(claudeRunnerAcceptsLogin({ ...ok, loggedIn: false })).toBe(false);
     expect(claudeRunnerAcceptsLogin({ ...ok, authMethod: "api_key" })).toBe(
       false,
@@ -676,6 +784,89 @@ describe("probeLocalClaudeCli", () => {
       available: true,
       authenticated: true,
       runtimeState: "signed-in",
+    });
+  });
+});
+
+describe("local Claude status as Electron main caches and lists it", () => {
+  const runner =
+    (statusRun: ClaudeCliProbeRun) =>
+    (args: readonly string[]): ClaudeCliProbeRun =>
+      args[0] === "--version"
+        ? { status: 0, stdout: "2.1.318", stderr: "" }
+        : statusRun;
+  const json = (value: unknown, status = 0): ClaudeCliProbeRun => ({
+    status,
+    stdout: JSON.stringify(value),
+    stderr: "",
+  });
+  const rowsFor = (status: ReturnType<typeof readLocalClaudeCliStatus>) =>
+    claudeCliModelOptions({
+      engine: "claude-cli",
+      supportedModels: ["claude-sonnet-5-5"],
+      probe: status,
+    });
+
+  it.each([
+    {
+      name: "signed out",
+      run: json({ loggedIn: false }, 1),
+      runtimeState: "needs-sign-in",
+    },
+    {
+      name: "claude.ai login with no plan",
+      run: json({ loggedIn: true, authMethod: "claude.ai" }),
+      runtimeState: "no-plan",
+    },
+    {
+      name: "API key",
+      run: json({ loggedIn: true, authMethod: "api_key" }),
+      runtimeState: "not-subscription",
+    },
+    {
+      name: "unreadable answer",
+      run: { status: 0, stdout: "not json", stderr: "" },
+      runtimeState: "unreadable",
+    },
+  ])(
+    "$name is not authenticated and its rows are unconfigured",
+    async ({ run, runtimeState }) => {
+      const sync = readLocalClaudeCliStatus(runner(run));
+      const async = await readLocalClaudeCliStatusAsync(async (args) =>
+        runner(run)(args),
+      );
+
+      for (const status of [sync, async]) {
+        expect(status).toMatchObject({
+          available: true,
+          authenticated: false,
+          runtimeState,
+          label: "Claude subscription",
+        });
+        expect(rowsFor(status)[0]).toMatchObject({
+          configured: false,
+          runtimeState,
+        });
+      }
+    },
+  );
+
+  it("a login the runner accepts is authenticated with a configured row", () => {
+    const status = readLocalClaudeCliStatus(
+      runner(
+        json({
+          loggedIn: true,
+          authMethod: "claude.ai",
+          apiProvider: "firstParty",
+          subscriptionType: "max",
+        }),
+      ),
+    );
+
+    expect(status.authenticated).toBe(true);
+    expect(rowsFor(status)[0]).toMatchObject({
+      configured: true,
+      statusLabel: "Claude subscription",
     });
   });
 });

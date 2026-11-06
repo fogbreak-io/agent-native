@@ -205,8 +205,9 @@ import {
 } from "./browser-control/native-host";
 import {
   claudeCliModelOptions,
-  probeLocalClaudeCli,
-  probeLocalClaudeCliAsync,
+  readLocalClaudeCliStatus,
+  readLocalClaudeCliStatusAsync,
+  type LocalClaudeCliStatus,
 } from "./claude-subscription.js";
 import {
   CLI_STATUS_TTL_MS,
@@ -12039,15 +12040,6 @@ function readConfiguredCodexModel(): string | undefined {
   return undefined;
 }
 
-interface LocalClaudeCliStatus {
-  available: boolean;
-  authenticated: boolean;
-  /** Why an installed CLI cannot run; absent when the CLI is not installed. */
-  runtimeState?: CodeAgentRuntimeState;
-  label: string;
-  error?: string;
-}
-
 const localClaudeCliStatusCache = createCliStatusCache<LocalClaudeCliStatus>();
 
 function getLocalClaudeCliStatus(
@@ -12055,16 +12047,11 @@ function getLocalClaudeCliStatus(
 ): LocalClaudeCliStatus {
   return cachedCliStatus(
     localClaudeCliStatusCache,
-    () => ({
-      ...probeLocalClaudeCli((args) => runCliSync("claude", [...args])),
-      label: "Claude subscription",
-    }),
-    async () => ({
-      ...(await probeLocalClaudeCliAsync((args) =>
+    () => readLocalClaudeCliStatus((args) => runCliSync("claude", [...args])),
+    () =>
+      readLocalClaudeCliStatusAsync((args) =>
         runCliAsync("claude", [...args]),
-      )),
-      label: "Claude subscription",
-    }),
+      ),
     Date.now,
     CLI_STATUS_TTL_MS,
     options,
