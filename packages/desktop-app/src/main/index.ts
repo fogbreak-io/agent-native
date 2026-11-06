@@ -5942,7 +5942,7 @@ async function desktopCodeAgentMcpEnvironment(
       app: { id: appConfig.id, name: appConfig.name },
       serverId,
       mcpUrl: appMcpUrl,
-      cookieHeader: cookieHeader ?? "",
+      cookieHeader,
       permissionMode: options.permissionMode ?? "",
       songStudio: {
         baseUrl,
