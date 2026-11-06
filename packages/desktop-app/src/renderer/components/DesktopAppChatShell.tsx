@@ -433,9 +433,11 @@ export default function DesktopAppChatShell({
   // The sign-in finishes in Terminal, outside this window: look again when the
   // person comes back, past the main-process status cache. One look at a time.
   const recheckingRef = useRef(false);
+  const [rechecking, setRechecking] = useState(false);
   const recheckLocalAgents = useCallback(async () => {
     if (recheckingRef.current) return;
     recheckingRef.current = true;
+    setRechecking(true);
     try {
       const result = await window.electronAPI.codeAgents.listModels({
         refresh: true,
@@ -453,6 +455,7 @@ export default function DesktopAppChatShell({
       setClaudeSignIn({ status: "recheck-failed" });
     } finally {
       recheckingRef.current = false;
+      setRechecking(false);
     }
   }, []);
   useEffect(() => {
@@ -847,6 +850,8 @@ export default function DesktopAppChatShell({
                     signIn={claudeSignIn}
                     onSignIn={() => void startClaudeSignIn()}
                     onRetry={() => void recheckLocalAgents()}
+                    canRetry={localAgentModelsFailed}
+                    retryBusy={rechecking}
                   />
                 ) : undefined
               }

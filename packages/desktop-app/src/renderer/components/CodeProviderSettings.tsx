@@ -13,9 +13,10 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type {
-  SubscriptionProviderId,
-  SubscriptionStatus,
+import {
+  isClaudeSubscriptionAuthMethod,
+  type SubscriptionProviderId,
+  type SubscriptionStatus,
 } from "../../../shared/subscription-status.js";
 
 type ProviderStatusTone = "ok" | "offline";
@@ -532,6 +533,17 @@ function subscriptionLabel(status: SubscriptionStatus | undefined): {
       connected: false,
     };
   }
+  if (status.connectionState === "no-subscription") {
+    return {
+      label: isClaudeSubscriptionAuthMethod(status.authMethod)
+        ? "No plan"
+        : "API key only",
+      description:
+        status.connectionMessage ??
+        "Signed in, but not with a subscription plan Fogbreak can use.",
+      connected: false,
+    };
+  }
   if (status.connectionState === "unavailable") {
     return {
       label: "Not installed",
@@ -666,14 +678,17 @@ function SubscriptionSettings() {
                   className="settings-btn settings-btn--ghost"
                   disabled={busy}
                   onClick={() =>
-                    statuses[providerId]?.connectionState === "needs-sign-in"
+                    statuses[providerId]?.connectionState === "needs-sign-in" ||
+                    statuses[providerId]?.connectionState === "no-subscription"
                       ? void connect(providerId)
                       : void refresh(providerId)
                   }
                 >
                   {busy
                     ? "Working…"
-                    : status.label === "Not signed in"
+                    : status.label === "Not signed in" ||
+                        statuses[providerId]?.connectionState ===
+                          "no-subscription"
                       ? "Sign in"
                       : "Refresh"}
                 </button>

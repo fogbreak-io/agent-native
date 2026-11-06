@@ -400,7 +400,7 @@ describe("desktop app chat Claude Code state", () => {
     await mountShell();
 
     expect(text("footer")).toContain(
-      "Claude is signed in, but no usable subscription plan was reported.",
+      "Claude is signed in, but not with a Claude subscription plan Fogbreak can use.",
     );
     const claude = JSON.parse(text("agents")).find(
       (agent: { id: string }) => agent.id === "claude-code",
@@ -472,5 +472,47 @@ describe("desktop app chat Claude Code state", () => {
     await settle();
 
     expect(text("selected")).toBe("claude-code");
+  });
+
+  it("offers Try again after a failed first model probe and recovers", async () => {
+    listModels.mockRejectedValueOnce(new Error("ipc failed"));
+    await mountShell();
+    expect(text("footer")).toContain("couldn't check which local agents");
+    expect(buttonLabeled("Try again")).toBeDefined();
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+
+    await act(async () => {
+      buttonLabeled("Try again")!.click();
+    });
+    await settle();
+
+    expect(listModels).toHaveBeenLastCalledWith({ refresh: true });
+    expect(text("footer")).toBe("");
+    const claude = JSON.parse(text("agents")).find(
+      (agent: { id: string }) => agent.id === "claude-code",
+    );
+    expect(claude).toMatchObject({ configured: true });
+  });
+
+  it("disables Try again while a re-check is in flight", async () => {
+    listModels.mockRejectedValueOnce(new Error("ipc failed"));
+    await mountShell();
+    let release: (value: unknown) => void = () => undefined;
+    listModels.mockImplementation(
+      () => new Promise((resolve) => (release = resolve)),
+    );
+
+    await act(async () => {
+      buttonLabeled("Try again")!.click();
+    });
+
+    expect(buttonLabeled("Try again")!.disabled).toBe(true);
+    await act(async () => {
+      release({ status: "ok", models: claudeModels("needs-sign-in") });
+    });
+    await settle();
   });
 });

@@ -121,7 +121,7 @@ export function describeClaudeCodeProblem(
     case "not-subscription":
       return "Claude Code is signed in with an API key, not a Claude subscription.";
     case "no-plan":
-      return "Claude is signed in, but no usable subscription plan was reported.";
+      return "Claude is signed in, but not with a Claude subscription plan Fogbreak can use.";
     case "unreadable":
       return "Fogbreak couldn't tell whether Claude Code is signed in.";
     case "not-installed":
