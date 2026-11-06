@@ -12,3 +12,12 @@ SKILL fogbreak:runtime-aware-agent-work READ whole; fogbreak:fogbreak-build READ
 | 15,53,83,93,94,95,97,107 Cloudflare | IN PROGRESS (route diagnosis above) |
 | 20,22,25,26,108 Control Room live in Chrome | OPEN |
 | 46 Claude panel/orchestrator inside Fogbreak.app | OPEN |
+
+## Findings 2026-11-06 ~07:10Z
+- PR #284 is not in fogbreak-io/agent-native (GET pulls/284 = 404; open PR list empty). It belongs to Song's repo/branch; CF preview of it cannot be deployed from this checkout.
+- Old Control Room artifact CLF8akvcxQWkJANBdHF4du: Artifact read returned "not found / not shared" for this dev account. D2-CONTROL-ROOM-CHROME-20261105.md, CF-PREVIEW-CONNECT-20261105.md live on the Mac only: grep of this repo finds neither.
+- Cloudflare: the connector exists in this org but this dev-cloud route cannot load it (needs_reconnect, enabledInChat=false). The route that works is the Mac Desktop orchestrator profile; deploy/read of the CF account must run there. Not a question for Kean.
+
+## Lanes launched (Sonnet 5.5, dev cloud, parent = this session)
+- aa511f22252c93318 build-lane: ask 46 Claude engine/panel audit+fix in packages/desktop-app (no push, returns sha)
+- ad718850cc5ea03a2 build-lane: live Control Room artifact (asks 20,22,25,26,108), new artifact + docs/orch8/control-room
