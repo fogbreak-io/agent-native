@@ -28,6 +28,7 @@ import {
   type CodeAgentRemoteConnectorControlResult,
   type CodeAgentRemoteConnectorPairResult,
   type CodeAgentRemoteConnectorStatus,
+  type RemoteConnectorProfileResult,
   type CodeAgentRerunResult,
   type CodeAgentRetryRunResult,
   type CodeAgentRun,
@@ -65,6 +66,7 @@ import type {
   CodeAgentTranscriptSubscription,
   CodeAgentTranscriptSubscriptionBatch,
 } from "../index.js";
+import type { RemoteConnectorProfileHandlers } from "../remote-connector-profiles.js";
 
 export interface CodeAgentsIpcDeps {
   isObject: (value: unknown) => value is Record<string, unknown>;
@@ -151,6 +153,7 @@ export interface CodeAgentsIpcDeps {
   pairRemoteCodeAgentConnector: (
     input: unknown,
   ) => Promise<CodeAgentRemoteConnectorPairResult>;
+  remoteConnectorProfiles: RemoteConnectorProfileHandlers;
 }
 
 export function registerCodeAgentsIpc(deps: CodeAgentsIpcDeps): void {
@@ -202,6 +205,7 @@ export function registerCodeAgentsIpc(deps: CodeAgentsIpcDeps): void {
     getRemoteConnectorStatus,
     setRemoteConnectorEnabled,
     pairRemoteCodeAgentConnector,
+    remoteConnectorProfiles,
   } = deps;
 
   ipcMain.handle(
@@ -617,5 +621,49 @@ export function registerCodeAgentsIpc(deps: CodeAgentsIpcDeps): void {
       input: unknown,
     ): Promise<CodeAgentRemoteConnectorPairResult> =>
       pairRemoteCodeAgentConnector(input),
+  );
+
+  ipcMain.handle(
+    IPC.CODE_AGENTS_REMOTE_PROFILE_GET_STATUS,
+    (
+      _event: IpcMainInvokeEvent,
+      input: unknown,
+    ): RemoteConnectorProfileResult => remoteConnectorProfiles.getStatus(input),
+  );
+
+  ipcMain.handle(
+    IPC.CODE_AGENTS_REMOTE_PROFILE_SET_ENABLED,
+    (
+      _event: IpcMainInvokeEvent,
+      input: unknown,
+    ): Promise<RemoteConnectorProfileResult> =>
+      remoteConnectorProfiles.setEnabled(input),
+  );
+
+  ipcMain.handle(
+    IPC.CODE_AGENTS_REMOTE_PROFILE_PAIR,
+    (
+      _event: IpcMainInvokeEvent,
+      input: unknown,
+    ): Promise<RemoteConnectorProfileResult> =>
+      remoteConnectorProfiles.pair(input),
+  );
+
+  ipcMain.handle(
+    IPC.CODE_AGENTS_REMOTE_PROFILE_RESTART,
+    (
+      _event: IpcMainInvokeEvent,
+      input: unknown,
+    ): Promise<RemoteConnectorProfileResult> =>
+      remoteConnectorProfiles.restart(input),
+  );
+
+  ipcMain.handle(
+    IPC.CODE_AGENTS_REMOTE_PROFILE_UNPAIR,
+    (
+      _event: IpcMainInvokeEvent,
+      input: unknown,
+    ): Promise<RemoteConnectorProfileResult> =>
+      remoteConnectorProfiles.unpair(input),
   );
 }

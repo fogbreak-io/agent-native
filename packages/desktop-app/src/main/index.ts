@@ -352,6 +352,13 @@ import {
   registerQuickPromptShortcut,
 } from "./quick-prompt";
 import {
+  RemoteConnectorSupervisor,
+  createRemoteConnectorProfileHandlers,
+  normalizeRemoteRelayUrl,
+  type ConnectorChild,
+  type ConnectorSpawnSpec,
+} from "./remote-connector-profiles.js";
+import {
   initializeDesktopSentry,
   installSentryWebContentsInstrumentation,
   setSentryWebContentsMetadata,
@@ -2556,22 +2563,6 @@ function codeAgentProjectsFile(): string {
   return path.join(codeAgentStoreRoot(), "projects.json");
 }
 
-const REMOTE_DEVICE_PATH_ENV = "AGENT_NATIVE_REMOTE_DEVICE_PATH";
-const REMOTE_CONNECTOR_INITIAL_BACKOFF_MS = 2_000;
-const REMOTE_CONNECTOR_MAX_BACKOFF_MS = 60_000;
-
-let remoteConnectorEnabled = false;
-let remoteConnectorProcess: ChildProcess | null = null;
-let remoteConnectorStartPromise: Promise<CodeAgentRemoteConnectorStatus> | null =
-  null;
-let remoteConnectorRestartTimer: NodeJS.Timeout | null = null;
-let remoteConnectorRestartCount = 0;
-let remoteConnectorStartedAt: string | undefined;
-let remoteConnectorLastExitAt: string | undefined;
-let remoteConnectorLastExitCode: number | null | undefined;
-let remoteConnectorLastExitSignal: string | null | undefined;
-let remoteConnectorNextRestartAt: string | undefined;
-let remoteConnectorError: string | undefined;
 let appIsQuitting = false;
 let multiFrontierAppIntegration: MultiFrontierAppIntegration | undefined;
 let multiFrontierDisposePromise: Promise<void> | undefined;
@@ -2625,84 +2616,86 @@ function isTrustedPermissionRequest(
   return !contentsOrigin || trustedOrigins.has(contentsOrigin);
 }
 
-function remoteDeviceConfigPath(): string {
-  return path.resolve(
-    process.env[REMOTE_DEVICE_PATH_ENV] ??
-      path.join(getHomeDirectory(), ".agent-native", "remote-device.json"),
-  );
-}
-
-function readRemoteDeviceConfig(): {
-  token: string;
-  relayUrl?: string;
-  deviceId?: string;
-  deviceName?: string;
-  workspacePath?: string;
-} | null {
-  try {
-    const raw = JSON.parse(
-      fs.readFileSync(remoteDeviceConfigPath(), "utf-8"),
-    ) as unknown;
-    if (!isObject(raw)) return null;
-    const token = firstStringValue(
-      raw.token,
-      raw.deviceToken,
-      raw.relayToken,
-      raw.accessToken,
-      raw.bearerToken,
-    );
-    if (!token) return null;
-    return {
-      token,
-      relayUrl: firstStringValue(raw.relayUrl, raw.url, raw.baseUrl),
-      deviceId: firstStringValue(raw.deviceId, raw.id),
-      deviceName: firstStringValue(raw.deviceName, raw.name),
-      workspacePath: firstStringValue(
-        raw.workspacePath,
-        raw.workspace,
-        raw.cwd,
-        raw.projectPath,
-      ),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeRemoteDeviceConfig(config: {
-  token: string;
-  relayUrl: string;
-  deviceId?: string;
-  deviceName?: string;
-  workspacePath?: string;
-}): void {
-  writeJsonFileAtomically(
-    remoteDeviceConfigPath(),
-    {
-      token: config.token,
-      relayUrl: config.relayUrl,
-      deviceId: config.deviceId,
-      deviceName: config.deviceName,
-      workspacePath: config.workspacePath,
+function spawnRemoteConnectorChild(spec: ConnectorSpawnSpec): ConnectorChild {
+  const child = spawn(spec.command, spec.args, {
+    cwd: spec.cwd,
+    detached: false,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: spec.env,
+  });
+  return {
+    get pid() {
+      return child.pid;
     },
-    { mode: 0o600 },
-  );
+    kill: (signal) => {
+      child.kill(signal);
+    },
+    onStdout: (listener) => {
+      child.stdout.on("data", (chunk) => listener(chunk.toString()));
+    },
+    onStderr: (listener) => {
+      child.stderr.on("data", (chunk) => listener(chunk.toString()));
+    },
+    onExit: (listener) => {
+      child.on("exit", listener);
+    },
+    onError: (listener) => {
+      child.on("error", listener);
+    },
+  };
 }
 
-function normalizeRemoteRelayUrl(
-  value: string | undefined,
-): string | undefined {
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return undefined;
-    }
-    return `${url.origin}${url.pathname.replace(/\/+$/, "") || "/"}`;
-  } catch {
-    return undefined;
-  }
-}
+const remoteConnectors = new RemoteConnectorSupervisor({
+  paths: () => ({
+    homeDir: getHomeDirectory(),
+    ambientDevicePath: process.env.AGENT_NATIVE_REMOTE_DEVICE_PATH,
+    codeAgentsHome: codeAgentStoreRoot(),
+  }),
+  io: {
+    readFile: (filePath) => fs.readFileSync(filePath, "utf-8"),
+    writeJsonAtomic: (filePath, value, options) =>
+      writeJsonFileAtomically(filePath, value, options),
+    removeFile: (filePath) => fs.rmSync(filePath),
+  },
+  spawn: spawnRemoteConnectorChild,
+  resolveInvocation: resolveRemoteConnectorCliInvocation,
+  baseEnv: () => AppStore.getCodeAgentProviderProcessEnv(process.env),
+  prepareComputer: () => ensureDesktopComputerMcpBridge(),
+  computerEnv: (runId) => remoteConnectorComputerEnv(runId),
+  revokeComputer: (runId) => revokeDesktopComputerRun(runId),
+  relayFetch: (profile, url, request) =>
+    (profile === "fogbreak"
+      ? session.fromPartition(FOGBREAK_SESSION_PARTITION)
+      : findRemoteRelaySession(url)
+    ).fetch(url, {
+      ...request,
+      credentials: "include",
+      redirect: "manual",
+    }),
+  deviceFetch: (url, request) => fetch(url, { ...request, redirect: "manual" }),
+  persistEnabled: (profile, enabled) => {
+    if (profile === "headtrip")
+      AppStore.saveRemoteConnectorSettings({ enabled });
+  },
+  hostLabel: () => os.hostname(),
+  defaultWorkspacePath: () =>
+    firstStringValue(process.env.AGENT_NATIVE_PORTAL_WORKSPACE_PATH),
+  log: {
+    info: (line) => console.info(line),
+    warn: (line) => console.warn(line),
+    childOutput: (stream, text) =>
+      stream === "stdout"
+        ? console.log(`[remote-code-agent] ${text}`)
+        : console.error(`[remote-code-agent] ${text}`),
+  },
+  now: () => Date.now(),
+  setTimer: (callback, ms) => setTimeout(callback, ms),
+  clearTimer: (handle) => clearTimeout(handle as NodeJS.Timeout),
+  isQuitting: () => appIsQuitting,
+});
+
+const remoteConnectorProfileHandlers =
+  createRemoteConnectorProfileHandlers(remoteConnectors);
 
 interface PortalRemoteHost {
   id: string;
@@ -2716,6 +2709,11 @@ interface PortalRelayResult extends Record<string, unknown> {
   ok?: boolean;
   error?: string;
   message?: string;
+}
+
+function headtripRelayUrl(): string | undefined {
+  const read = remoteConnectors.readConfig("headtrip");
+  return read.kind === "ok" ? read.relayUrl : undefined;
 }
 
 function resolvePortalRelayUrl(input: unknown): string {
@@ -2739,7 +2737,7 @@ function resolvePortalRelayUrl(input: unknown): string {
   }
   const candidates = [
     firstStringValue(payload.relayUrl),
-    readRemoteDeviceConfig()?.relayUrl,
+    headtripRelayUrl(),
     configuredAppUrl,
     activeWebviewUrl,
     process.env.AGENT_NATIVE_PORTAL_RELAY_URL,
@@ -3638,31 +3636,7 @@ async function submitCodeAgentRemoteWaitlist(
 }
 
 function getRemoteConnectorStatus(): CodeAgentRemoteConnectorStatus {
-  const config = readRemoteDeviceConfig();
-  const relayUrl = normalizeRemoteRelayUrl(config?.relayUrl);
-  const configured = Boolean(config?.token && relayUrl);
-  let state: CodeAgentRemoteConnectorStatus["state"] = "stopped";
-  if (!remoteConnectorEnabled) state = "disabled";
-  else if (!configured) state = "unconfigured";
-  else if (remoteConnectorProcess?.pid) state = "running";
-  else if (remoteConnectorNextRestartAt) state = "starting";
-  else if (remoteConnectorError) state = "error";
-  return {
-    state,
-    enabled: remoteConnectorEnabled,
-    configured,
-    configPath: remoteDeviceConfigPath(),
-    relayUrl,
-    workspacePath: config?.workspacePath,
-    pid: remoteConnectorProcess?.pid,
-    startedAt: remoteConnectorStartedAt,
-    lastExitAt: remoteConnectorLastExitAt,
-    lastExitCode: remoteConnectorLastExitCode,
-    lastExitSignal: remoteConnectorLastExitSignal,
-    restartCount: remoteConnectorRestartCount,
-    nextRestartAt: remoteConnectorNextRestartAt,
-    error: remoteConnectorError,
-  };
+  return remoteConnectors.legacyStatus();
 }
 
 function resolveRemoteConnectorCliInvocation(): {
@@ -3706,141 +3680,11 @@ function resolveRemoteConnectorCliInvocation(): {
   };
 }
 
-async function startRemoteCodeAgentConnector(): Promise<CodeAgentRemoteConnectorStatus> {
-  if (remoteConnectorStartPromise) return remoteConnectorStartPromise;
-  const startPromise = startRemoteCodeAgentConnectorInternal();
-  remoteConnectorStartPromise = startPromise;
-  try {
-    return await startPromise;
-  } finally {
-    if (remoteConnectorStartPromise === startPromise) {
-      remoteConnectorStartPromise = null;
-    }
-  }
-}
-
-async function startRemoteCodeAgentConnectorInternal(): Promise<CodeAgentRemoteConnectorStatus> {
-  if (!remoteConnectorEnabled || appIsQuitting)
-    return getRemoteConnectorStatus();
-  if (remoteConnectorProcess && !remoteConnectorProcess.killed) {
-    return getRemoteConnectorStatus();
-  }
-  const config = readRemoteDeviceConfig();
-  const relayUrl = normalizeRemoteRelayUrl(config?.relayUrl);
-  if (!config || !relayUrl) {
-    remoteConnectorError = config
-      ? "Remote device config is missing relayUrl."
-      : undefined;
-    return getRemoteConnectorStatus();
-  }
-  if (remoteConnectorRestartTimer) {
-    clearTimeout(remoteConnectorRestartTimer);
-    remoteConnectorRestartTimer = null;
-  }
-  remoteConnectorNextRestartAt = undefined;
-  remoteConnectorError = undefined;
-
-  const invocation = resolveRemoteConnectorCliInvocation();
-  const args = [...invocation.args, "code", "serve", "--relay-url", relayUrl];
-  try {
-    await ensureDesktopComputerMcpBridge();
-    if (!remoteConnectorEnabled || appIsQuitting) {
-      return getRemoteConnectorStatus();
-    }
-    const computerEnv = remoteConnectorComputerEnv();
-    const child = spawn(invocation.command, args, {
-      cwd: invocation.cwd,
-      detached: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...AppStore.getCodeAgentProviderProcessEnv(process.env),
-        ...invocation.env,
-        AGENT_NATIVE_CODE_AGENTS_HOME: codeAgentStoreRoot(),
-        ...computerEnv,
-      },
-    });
-    remoteConnectorProcess = child;
-    remoteConnectorStartedAt = new Date().toISOString();
-    child.stdout?.on("data", (chunk) => {
-      const text = chunk.toString().trim();
-      if (text) console.log(`[remote-code-agent] ${text}`);
-    });
-    child.stderr?.on("data", (chunk) => {
-      const text = chunk.toString().trim();
-      if (text) console.error(`[remote-code-agent] ${text}`);
-    });
-    child.on("exit", (code, signal) => {
-      revokeRemoteConnectorComputerControl();
-      if (remoteConnectorProcess === child) remoteConnectorProcess = null;
-      remoteConnectorLastExitAt = new Date().toISOString();
-      remoteConnectorLastExitCode = code;
-      remoteConnectorLastExitSignal = signal;
-      if (!appIsQuitting && remoteConnectorEnabled) {
-        scheduleRemoteConnectorRestart();
-      }
-    });
-    child.on("error", (err) => {
-      revokeRemoteConnectorComputerControl();
-      remoteConnectorError = err instanceof Error ? err.message : String(err);
-      if (remoteConnectorProcess === child) remoteConnectorProcess = null;
-      if (!appIsQuitting && remoteConnectorEnabled) {
-        scheduleRemoteConnectorRestart();
-      }
-    });
-  } catch (err) {
-    revokeRemoteConnectorComputerControl();
-    remoteConnectorError = err instanceof Error ? err.message : String(err);
-    scheduleRemoteConnectorRestart();
-  }
-  return getRemoteConnectorStatus();
-}
-
-function scheduleRemoteConnectorRestart(): void {
-  if (remoteConnectorRestartTimer || !remoteConnectorEnabled || appIsQuitting) {
-    return;
-  }
-  const delay = Math.min(
-    REMOTE_CONNECTOR_INITIAL_BACKOFF_MS *
-      Math.max(1, 2 ** remoteConnectorRestartCount),
-    REMOTE_CONNECTOR_MAX_BACKOFF_MS,
-  );
-  remoteConnectorRestartCount += 1;
-  remoteConnectorNextRestartAt = new Date(Date.now() + delay).toISOString();
-  remoteConnectorRestartTimer = setTimeout(() => {
-    remoteConnectorRestartTimer = null;
-    remoteConnectorNextRestartAt = undefined;
-    void startRemoteCodeAgentConnector();
-  }, delay);
-}
-
 async function setRemoteConnectorEnabled(
   enabled: boolean,
 ): Promise<CodeAgentRemoteConnectorControlResult> {
-  remoteConnectorEnabled = enabled;
-  try {
-    AppStore.saveRemoteConnectorSettings({ enabled });
-  } catch (err) {
-    remoteConnectorError = err instanceof Error ? err.message : String(err);
-  }
-  if (!enabled) {
-    if (remoteConnectorRestartTimer) {
-      clearTimeout(remoteConnectorRestartTimer);
-      remoteConnectorRestartTimer = null;
-    }
-    remoteConnectorNextRestartAt = undefined;
-    remoteConnectorRestartCount = 0;
-    if (remoteConnectorProcess?.pid) {
-      try {
-        remoteConnectorProcess.kill("SIGTERM");
-      } catch (err) {
-        remoteConnectorError = err instanceof Error ? err.message : String(err);
-      }
-    }
-    remoteConnectorProcess = null;
-    return { ok: true, status: getRemoteConnectorStatus() };
-  }
-  remoteConnectorRestartCount = 0;
-  return { ok: true, status: await startRemoteCodeAgentConnector() };
+  await remoteConnectors.setEnabled("headtrip", enabled);
+  return { ok: true, status: remoteConnectors.legacyStatus() };
 }
 
 function parseRemoteConnectorPairRequest(
@@ -3897,118 +3741,18 @@ async function pairRemoteCodeAgentConnector(
   input: unknown,
 ): Promise<CodeAgentRemoteConnectorPairResult> {
   const request = parseRemoteConnectorPairRequest(input);
-  const relayUrl = normalizeRemoteRelayUrl(request.relayUrl);
-  if (!relayUrl) {
-    return {
-      ok: false,
-      status: getRemoteConnectorStatus(),
-      error: "Enter a valid Agent-Native app URL to pair remote control.",
-    };
-  }
-
-  try {
-    const relaySession = findRemoteRelaySession(relayUrl);
-    const response = await relaySession.fetch(
-      new URL(
-        "/_agent-native/integrations/remote/register",
-        relayUrl,
-      ).toString(),
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          label: request.label ?? `${os.hostname()} Desktop`,
-        }),
-        credentials: "include",
-        redirect: "manual",
-      },
-    );
-    const text = await response.text();
-    const payload = text ? (JSON.parse(text) as unknown) : null;
-    if (!response.ok || !isObject(payload)) {
-      const error = isObject(payload)
-        ? firstStringValue(payload.error, payload.message)
-        : undefined;
-      return {
-        ok: false,
-        status: getRemoteConnectorStatus(),
-        error:
-          error ??
-          `Remote pairing returned ${response.status} from ${new URL(relayUrl).host}.`,
-      };
-    }
-
-    const device = isObject(payload.device) ? payload.device : {};
-    const token = firstStringValue(
-      payload.token,
-      payload.deviceToken,
-      payload.relayToken,
-      payload.accessToken,
-    );
-    if (!token) {
-      const error = firstStringValue(payload.error, payload.message);
-      return {
-        ok: false,
-        status: getRemoteConnectorStatus(),
-        error: error ?? "The app did not return a remote device token.",
-      };
-    }
-
-    const deviceId = firstStringValue(payload.deviceId, device.id);
-    const deviceName = firstStringValue(
-      payload.deviceName,
-      payload.label,
-      device.label,
-      device.name,
-    );
-    const existingWorkspacePath = readRemoteDeviceConfig()?.workspacePath;
-    const workspacePath =
-      request.workspacePath ??
-      existingWorkspacePath ??
-      firstStringValue(process.env.AGENT_NATIVE_PORTAL_WORKSPACE_PATH);
-    writeRemoteDeviceConfig({
-      token,
-      relayUrl,
-      deviceId,
-      deviceName,
-      workspacePath,
-    });
-
-    remoteConnectorEnabled = true;
-    AppStore.saveRemoteConnectorSettings({ enabled: true });
-    remoteConnectorError = undefined;
-    remoteConnectorRestartCount = 0;
-    remoteConnectorNextRestartAt = undefined;
-    if (remoteConnectorRestartTimer) {
-      clearTimeout(remoteConnectorRestartTimer);
-      remoteConnectorRestartTimer = null;
-    }
-    if (remoteConnectorProcess?.pid) {
-      try {
-        remoteConnectorProcess.kill("SIGTERM");
-      } catch {
-        // A fresh connector start below will report any remaining failure.
-      }
-      remoteConnectorProcess = null;
-    }
-
-    return {
-      ok: true,
-      status: await startRemoteCodeAgentConnector(),
-      deviceId,
-      message: "Remote control paired.",
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    remoteConnectorError = message;
-    return {
-      ok: false,
-      status: getRemoteConnectorStatus(),
-      error: message,
-    };
-  }
+  const result = await remoteConnectors.pair("headtrip", {
+    relayUrl: request.relayUrl,
+    label: request.label,
+    workspacePath: request.workspacePath,
+  });
+  return {
+    ok: result.ok,
+    status: remoteConnectors.legacyStatus(),
+    ...(result.deviceId ? { deviceId: result.deviceId } : {}),
+    ...(result.message ? { message: result.message } : {}),
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
 function timestampSlug(value: string): string {
@@ -5812,10 +5556,10 @@ function revokeDesktopComputerRun(runId: string): void {
   void desktopComputerMcpBridge?.revokeRun(runId).catch(() => undefined);
 }
 
-function remoteConnectorComputerEnv(): NodeJS.ProcessEnv {
+function remoteConnectorComputerEnv(runId: string): NodeJS.ProcessEnv {
   if (!desktopComputerMcpBridge) return {};
   try {
-    const registration = desktopComputerMcpBridge.registerConnector();
+    const registration = desktopComputerMcpBridge.registerConnector(runId);
     return {
       AGENT_NATIVE_COMPUTER_BRIDGE_URL: registration.url,
       AGENT_NATIVE_COMPUTER_BRIDGE_TOKEN: registration.bearerToken,
@@ -5988,10 +5732,6 @@ async function desktopCodeAgentMcpEnvironment(
     },
     remoteConfig,
   };
-}
-
-function revokeRemoteConnectorComputerControl(): void {
-  revokeDesktopComputerRun("__remote_connector__");
 }
 
 function signalCodeAgentProcess(pid: number, signal: NodeJS.Signals): boolean {
@@ -12845,6 +12585,7 @@ registerCodeAgentsIpc({
   getRemoteConnectorStatus,
   setRemoteConnectorEnabled,
   pairRemoteCodeAgentConnector,
+  remoteConnectorProfiles: remoteConnectorProfileHandlers,
 });
 
 registerQuickPromptIpc({
@@ -14641,7 +14382,7 @@ void app.whenReady().then(async () => {
   await ensureSongStudioLocalSession();
   const win = createWindow();
   registerQuickPromptShortcut();
-  remoteConnectorEnabled = false;
+  remoteConnectors.resetEnabled();
   if (AppStore.loadRemoteConnectorSettings().enabled) {
     AppStore.saveRemoteConnectorSettings({ enabled: false });
   }
@@ -14725,12 +14466,7 @@ app.on("before-quit", (event) => {
       stopManagedDesktopApp(appId);
     }
     pauseActiveCodeAgentProcessesForShutdown();
-    if (remoteConnectorRestartTimer) {
-      clearTimeout(remoteConnectorRestartTimer);
-      remoteConnectorRestartTimer = null;
-    }
-    remoteConnectorProcess?.kill("SIGTERM");
-    remoteConnectorProcess = null;
+    remoteConnectors.stopAll();
     void closeDesktopComputerMcpBridge().catch((error) => {
       console.warn(
         "[computer-control] failed to close desktop bridges during shutdown:",

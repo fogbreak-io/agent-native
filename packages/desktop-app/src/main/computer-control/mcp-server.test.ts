@@ -184,6 +184,42 @@ describe("DesktopComputerMcpBridge", () => {
     }
   });
 
+  it("keeps each remote connector's bridge credential independent", async () => {
+    const harness = await createHarness("full-auto");
+    const probe = (bearerToken: string) =>
+      fetch(harness.registration.url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      }).then((response) => response.status);
+
+    const headtrip = harness.bridge.registerConnector();
+    const fogbreak = harness.bridge.registerConnector(
+      "__remote_connector__:fogbreak",
+    );
+
+    expect(await probe(headtrip.bearerToken)).not.toBe(401);
+    expect(await probe(fogbreak.bearerToken)).not.toBe(401);
+
+    await harness.bridge.revokeRun("__remote_connector__:fogbreak");
+    expect(await probe(fogbreak.bearerToken)).toBe(401);
+    expect(await probe(headtrip.bearerToken)).not.toBe(401);
+
+    const renewed = harness.bridge.registerConnector();
+    expect(await probe(headtrip.bearerToken)).toBe(401);
+    expect(await probe(renewed.bearerToken)).not.toBe(401);
+  });
+
+  it("rejects a connector registration that is not a remote connector id", async () => {
+    const harness = await createHarness("full-auto");
+    expect(() => harness.bridge.registerConnector("run-server-owned")).toThrow(
+      "remote connector id",
+    );
+  });
+
   it("opens only named local Content working copies through the trusted bridge", async () => {
     const openContentWorkingCopy = vi.fn(({ folder, name }) => ({
       id: "folder-opaque",

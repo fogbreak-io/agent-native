@@ -101,8 +101,11 @@ describe("desktop passive-access regressions", () => {
     expect(startup).not.toContain("cleanupDueManagedCodeAgentWorktrees");
     expect(startup).not.toContain("resumeQueuedCodeAgentWorktreeRuns");
     expect(main).toContain("function ensureDesktopComputerMcpBridge()");
-    expect(main).toContain("remoteConnectorStartPromise");
-    expect(main).toContain("startRemoteCodeAgentConnectorInternal()");
+    // source-read-ok: boundary check that connector start stays lazy and off the startup path.
+    const connectors = source("./remote-connector-profiles.ts");
+    expect(startup).not.toContain("remoteConnectors.start(");
+    expect(connectors).toContain("runtime.startPromise = startPromise");
+    expect(connectors).toContain("await this.deps.prepareComputer()");
   });
 
   it("does not revalidate a verified desktop identity on tab status reads", () => {
