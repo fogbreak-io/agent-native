@@ -1,5 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
+import {
+  resolveExecutable,
+  withResolvedExecutablePaths,
+} from "./code-agent-runner.js";
+
 import type {
   SubscriptionPlan,
   SubscriptionRateLimitMeter,
@@ -796,7 +801,10 @@ export function defaultCodexCommandRunner(
   args: string[],
   timeoutMs: number,
   spawnCommand: SpawnCodexCommand = (commandArgs) =>
-    spawn("codex", commandArgs, {
+    spawn(resolveExecutable("codex", process.env) ?? "codex", commandArgs, {
+      // Packaged macOS apps start with a bare PATH (/usr/bin:/bin:...), so find
+      // codex in ~/.local/bin etc. and give its /bin/sh launcher a node on PATH.
+      env: withResolvedExecutablePaths(process.env, ["codex"]),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     }),
@@ -883,10 +891,15 @@ function appendBoundedOutput(current: string, next: string): string {
 }
 
 function defaultSpawnCodexAppServer(): CodexJsonRpcChildProcess {
-  return spawn("codex", ["app-server"], {
-    stdio: ["pipe", "pipe", "ignore"],
-    windowsHide: true,
-  }) as CodexJsonRpcChildProcess;
+  return spawn(
+    resolveExecutable("codex", process.env) ?? "codex",
+    ["app-server"],
+    {
+      env: withResolvedExecutablePaths(process.env, ["codex"]),
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    },
+  ) as CodexJsonRpcChildProcess;
 }
 
 function commandText(result: CodexCommandResult): string | undefined {

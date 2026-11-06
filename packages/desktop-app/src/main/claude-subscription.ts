@@ -1,5 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
+import {
+  resolveExecutable,
+  withResolvedExecutablePaths,
+} from "./code-agent-runner.js";
+
 import type {
   SubscriptionStatus,
   SubscriptionTelemetry,
@@ -242,12 +247,19 @@ export function executeClaudeProcess(
   args: readonly string[],
   options: ClaudeProcessExecutorOptions,
   spawnProcess: SpawnClaudeProcess = (processCommand, processArgs) =>
-    spawn(processCommand, processArgs, {
-      detached: false,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    }),
+    // Packaged macOS apps start with a bare PATH, so resolve claude in
+    // ~/.local/bin etc. before spawning.
+    spawn(
+      resolveExecutable(processCommand, process.env) ?? processCommand,
+      processArgs,
+      {
+        env: withResolvedExecutablePaths(process.env, [processCommand]),
+        detached: false,
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    ),
 ): Promise<ClaudeProcessResult> {
   return new Promise((resolve) => {
     let stdout = "";
