@@ -11,7 +11,7 @@ SKILL fogbreak:runtime-aware-agent-work READ whole; fogbreak:fogbreak-build READ
 |---|---|
 | 15,53,83,93,94,95,97,107 Cloudflare | IN PROGRESS (route diagnosis above) |
 | 20,22,25,26,108 Control Room live in Chrome | PR https://github.com/fogbreak-io/agent-native/pull/1 (head claude/orch8-desktop-control-room f8133808; file sha256 f8a754be...b420, artifact v3). Independent review: Verdict: APPROVE at b015105584cb4c7fa9e78e5debc90705f2f64264 (same file hash). UNPROVEN: live connector run in a real viewer, owner view, plain Chrome; per-session iframe not allowed by artifact contract |
-| 46 Claude panel/orchestrator inside Fogbreak.app | IN PROGRESS: Claude sign-in/panel fix on branch claude/orch8-desktop-claude-panel @ b859863c (base 1910aa68, 10 files, packages/desktop-app only); reviewer a6c1914ba41cfb221 running; no PR yet. Orchestrator panel itself NOT built (no evidence it exists). CLI-only, owner view untested |
+| 46 Claude panel/orchestrator inside Fogbreak.app | PR https://github.com/fogbreak-io/agent-native/pull/2 head bb71b5a0e097854de1acac02a9b8450a437cdf0f, Verdict: APPROVE at bb71b5a0e097854de1acac02a9b8450a437cdf0f (6th review; rounds b859863c, d620fe1a, 7f9d9162, 7bb38505 rejected). UNPROVEN: real signed-out Mac run, Terminal launch, window focus on return. Orchestrator panel NOT built. (older state: Claude sign-in/panel fix on branch claude/orch8-desktop-claude-panel @ b859863c (base 1910aa68, 10 files, packages/desktop-app only); reviewer a6c1914ba41cfb221 running; no PR yet. Orchestrator panel itself NOT built (no evidence it exists). CLI-only, owner view untested |
 
 ## Findings 2026-11-06 ~07:10Z
 - PR #284 is not in fogbreak-io/agent-native (GET pulls/284 = 404; open PR list empty). It belongs to Song's repo/branch; CF preview of it cannot be deployed from this checkout.
@@ -55,3 +55,9 @@ Orchestrator #8 (Mac Desktop profile has the working Cloudflare MCP): read accou
 STATE: claude-panel fix round 4 running in lane aa511f22252c93318 (round 3 head 7f9d9162 was rejected by 4th reviewer: Settings row + isClaudeSubscriptionStatus still 'Connected' for logins the runner rejects; index.ts wiring untested). No final head yet, no PR yet, no APPROVE yet.
 NEXT: when the lane returns -> re-cut claude/orch8-desktop-claude-panel (final head) -> 5th independent review at that sha -> open PR to fogbreak/desktop-current with FAILED/UNPROVEN first (PR may open before APPROVE; merge waits for it).
 CLOUD MAC BUILD: NOT STARTED, depends on the final head. Facts: .github/workflows/desktop-release.yml build-mac runs on macos-latest but uses `--publish always` (publishes to the release channel) so I will NOT dispatch it; the earlier Fogbreak cloud handoff built on Linux only (typecheck/test/build, 'Mac assets BLOCKED by missing approved icon'). A real Mac app needs a macOS runner or a Linux electron-builder --mac --dir attempt; will report artifact path+hash or the exact blocker.
+
+## Status 2026-11-06 ~09:1xZ
+- PR #2 (Claude panel) Verdict: APPROVE at bb71b5a0e097854de1acac02a9b8450a437cdf0f. Ready for #8 to merge/build.
+- PR #3 (dual relay) https://github.com/fogbreak-io/agent-native/pull/3 head 761ff686663737ca210b4ebe15c3a5ac49a99206 (stacked on bb71b5a0; 2 commits: d32cba16 desktop supervisor, 761ff686 core base-path fix with changeset). Independent review running (a2862f88a6d89bb41), no APPROVE yet. UNPROVEN: real pairing against fogbreak.io, iPhone Sessions listing, real connector, cookie acceptance on /remote/register.
+- Control Room PR #1 merged (7730081); follow-up .panel[hidden] at e9d3af10 on claude/orch8-desktop-control-room-hidden (no PR).
+- Cloudflare closed by #8 via Mac MCP. Cloud Mac build cancelled by #8 (built on MacBook).
