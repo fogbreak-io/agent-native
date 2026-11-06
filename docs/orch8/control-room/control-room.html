@@ -101,6 +101,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tab.stale { background-image: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--warn) 7%, transparent) 7px 8px); }
 .tab.suspect { background-image: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--bad) 9%, transparent) 7px 8px); }
 .tab.suspect .stamp b { color: var(--bad); }
+.tab.notlive .stamp b, .tab.notlive .t { color: var(--muted); }
 .skel { height: 96px; flex: 0 0 248px; border-radius: 4px; background: linear-gradient(90deg, var(--surface), var(--surface-2), var(--surface)); background-size: 200% 100%; animation: sh 1.4s linear infinite; border: 1px solid var(--line); }
 @keyframes sh { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
@@ -177,7 +178,8 @@ dd.bad { color: var(--bad); }
     mcp: null,
     unwatch: null,
     selected: null,
-    events: {}
+    events: {},
+    eventsBlocked: null   // set when the connector was lost; messages read earlier are hidden
   };
   var tabs = {};        // session id -> {btn, title, chip, pill, upd, ago}
   var stripKey = "";    // which placeholder (or "tabs") the strip currently shows
@@ -196,6 +198,8 @@ dd.bad { color: var(--bad); }
 
   /* ---------- time ---------- */
   function ms(v) { if (v == null || v === "") return null; var t = Date.parse(v); return isFinite(t) ? t : null; }
+  // A cache marker whose storedAt is missing, 0 or NaN carries no usable time: it must never read as fresh.
+  function okTime(n) { return typeof n === "number" && isFinite(n) && n > 0 ? n : null; }
   function dur(s) {
     s = Math.max(0, Math.round(s));
     if (s < 60) return s + " s";
@@ -211,9 +215,10 @@ dd.bad { color: var(--bad); }
     return d > STALE_MS ? "stale" : "fresh";
   }
   function ago(t) {
+    if (t == null) return "time unknown";
     var d = Date.now() - t;
-    if (d < -SKEW_MS) return dur(-d / 1000) + " in the future";
-    return dur(Math.max(0, d) / 1000) + " ago";
+    if (d < 0) return dur(-d / 1000) + " in the future";
+    return dur(d / 1000) + " ago";
   }
   function clock(t) {
     var d = new Date(t), today = new Date();
@@ -296,8 +301,10 @@ dd.bad { color: var(--bad); }
     if (state.error && !live) return { kind: "err", label: "No live feed" };
     if (state.error) return { kind: "err", label: "Feed failed" };
     if (live) {
-      if (ageClass(live.asOf) === "suspect") return { kind: "snap", label: "Clock skew" };
-      if (Date.now() - live.asOf > FEED_STALE_MS) return { kind: "snap", label: "Stale feed" };
+      var h = feedHealth();
+      if (h === "skew") return { kind: "snap", label: "Clock skew" };
+      if (h === "unknown") return { kind: "snap", label: "Feed age unknown" };
+      if (h === "stale") return { kind: "snap", label: "Stale feed" };
       return { kind: "live", label: "Live" };
     }
     if (state.snap) return { kind: "snap", label: ageClass(state.snap.asOf) === "suspect" ? "Snapshot, clock skew" : "Snapshot" };
@@ -306,6 +313,26 @@ dd.bad { color: var(--bad); }
   }
   function allSettled() { return state.liveSettled && state.snapSettled; }
 
+  // ok: live data, answered recently, no error. Anything else means rows cannot be called current.
+  var NOT_LIVE = { failed: "feed stopped", stale: "feed stale", snapshot: "snapshot", unknown: "feed age unknown", skew: "clock skew" };
+  function feedHealth() {
+    var cur = current();
+    if (!cur) return "none";
+    if (cur !== state.live) return "snapshot";
+    if (state.error) return "failed";
+    if (cur.asOf == null) return "unknown";
+    if (ageClass(cur.asOf) === "suspect") return "skew";
+    return Date.now() - cur.asOf > FEED_STALE_MS ? "stale" : "ok";
+  }
+  // A row's own age, unless the feed behind it is not live: then even a recent row is only "notlive".
+  function rowClass(s) {
+    var c = ageClass(s.updated);
+    return c === "fresh" && feedHealth() !== "ok" ? "notlive" : c;
+  }
+  function stateLabel(s, c) {
+    return (s.bucket === "working" && c !== "fresh" ? "last seen working" : s.bucket.replace("_", " ")) + " · " + s.status;
+  }
+
   /* ---------- status bar ---------- */
   function renderBar() {
     var cur = current(), bd = feedBadge(), badge = $("badge"), asof = $("asof");
@@ -313,32 +340,35 @@ dd.bad { color: var(--bad); }
     setText(badge.lastChild, bd.label);
     var line;
     if (cur) {
-      var n = { stale: 0, suspect: 0, none: 0, working: 0 };
+      var n = { stale: 0, suspect: 0, none: 0, notlive: 0, working: 0, workingOld: 0 };
       cur.sessions.forEach(function (s) {
-        var c = ageClass(s.updated);
-        if (c !== "fresh") n[c]++;
-        if (s.bucket === "working") n.working++;
+        var c = rowClass(s), w = s.bucket === "working";
+        if (c === "fresh") { if (w) n.working++; }
+        else { n[c]++; if (w) n.workingOld++; }
       });
-      var parts = [cur.sessions.length + " shown" + (cur.hasMore ? ", more exist and are not loaded" : ""), n.working + " working", n.stale + " stale"];
+      var parts = [cur.sessions.length + " shown" + (cur.hasMore ? ", more exist and are not loaded" : ""), n.working + " working now"];
+      if (n.workingOld) parts.push(n.workingOld + " last seen working, not current");
+      parts.push(n.stale + " stale");
+      if (n.notlive) parts.push(n.notlive + " recent but feed not live");
       if (n.suspect) parts.push(n.suspect + " with suspect timestamps");
       if (n.none) parts.push(n.none + " with no timestamp");
       if (cur.dropped) parts.push(cur.dropped + " skipped (no id)");
       var skew = ageClass(cur.asOf) === "suspect";
-      line = "Data as of " + clock(cur.asOf) + " " + TZ + " (" + ago(cur.asOf) + (skew ? ", clock skew" : "") + ") · " + parts.join(" · ");
+      line = (cur.asOf == null ? "Data time unknown" : "Data as of " + clock(cur.asOf) + " " + TZ + " (" + ago(cur.asOf) + (skew ? ", clock skew" : "") + ")") + " · " + parts.join(" · ");
     } else {
       line = allSettled() ? "Nothing to show." : "Waiting for the session feed…";
     }
     setText(asof, line);
     $("refresh").disabled = !state.mcp || state.halted;
     // Announce only when the feed's condition changes, never on a tick.
-    var key = bd.label + "|" + (state.error ? state.error.code : "");
+    var key = bd.label + "|" + (state.error ? state.error.code + (state.error.approval ? state.error.at : "") : "");
     if (key !== lastAnnounce) { lastAnnounce = key; setText($("status"), bd.label + (state.error ? ". " + state.error.message : ".")); }
   }
 
   /* ---------- alerts ---------- */
   function addAlert(box, title, paras, warn, button) {
+    // No role="alert" here: #status announces feed changes once, so the page does not read them twice.
     var a = el("div", warn ? "alert warn" : "alert");
-    if (!warn) a.setAttribute("role", "alert");
     a.appendChild(el("strong", null, title));
     paras.forEach(function (p) {
       var n = el("p", null, p.text + (p.code ? " " : ""));
@@ -350,7 +380,8 @@ dd.bad { color: var(--bad); }
   }
   function snapNote() {
     if (state.snap) return "Showing a stored snapshot taken " + clock(state.snap.asOf) + " " + TZ + (ageClass(state.snap.asOf) === "suspect" ? ", a time ahead of this device's clock, so treat it with suspicion" : "") + ". It is not live.";
-    return state.snapError ? "No snapshot to fall back on. " + state.snapError.message : "No snapshot to fall back on.";
+    if (!state.snapSettled) return "No snapshot yet: the stored snapshot is still loading.";
+    return state.snapError ? "No stored snapshot to fall back on. " + state.snapError.message : "No stored snapshot to fall back on.";
   }
   function renderAlerts() {
     var live = state.live, snap = state.snap;
@@ -370,14 +401,20 @@ dd.bad { color: var(--bad); }
       if (state.error.approval && state.mcp) {
         btn = el("button", "btn", "Approve and load sessions"); btn.type = "button";
         btn.addEventListener("click", function () {
-          btn.disabled = true;
-          state.mcp.callTool(SERVER, "list_sessions", { limit: 30 }).then(function (res) { handleLive(res); }, function (e) { setLiveError(e); });
+          btn.disabled = true; btn.textContent = "Asking…";
+          // Same guard as the watch handler; the button is usable again on every outcome.
+          state.mcp.callTool(SERVER, "list_sessions", { limit: 30 }, { cache: { refresh: true, staleTime: 0, gcTime: 60000 } })
+            .then(function (res) { guarded(function () { handleLive(res); }); }, function (e) { setLiveError(e, true); })
+            .then(function () { btn.disabled = false; btn.textContent = "Approve and load sessions"; });
         });
       }
       var tail = live
-        ? "Showing the last rows received at " + clock(live.asOf) + " " + TZ + ". Treat them as old."
+        ? "Showing the last rows received at " + (live.asOf == null ? "an unknown time" : clock(live.asOf) + " " + TZ) + ". Treat them as old."
         : snapNote();
-      addAlert(box, live ? "Live feed stopped updating" : "Live feed unavailable", [{ text: state.error.message, code: state.error.code }, { text: tail }], false, btn);
+      var paras = [{ text: state.error.message, code: state.error.code }];
+      if (state.error.at) paras.push({ text: "Tried again at " + clock(state.error.at) + " " + TZ + ". Same answer." });
+      paras.push({ text: tail });
+      addAlert(box, live ? "Live feed stopped updating" : "Live feed unavailable", paras, false, btn);
     } else if (!live && snap) {
       addAlert(box, "Waiting for the live feed", [{ text: snapNote() }], true);
     }
@@ -404,14 +441,16 @@ dd.bad { color: var(--bad); }
     return t;
   }
   function updateTab(t, s) {
-    var c = ageClass(s.updated);
-    setClass(t.btn, "tab " + toneClass(s) + (c === "stale" ? " stale" : c === "suspect" ? " suspect" : ""));
+    var c = rowClass(s);
+    // A row that is not current must not keep the green "working" tone.
+    var tone = s.bucket === "working" && c !== "fresh" ? "tone-other" : toneClass(s);
+    setClass(t.btn, "tab " + tone + (c === "fresh" ? "" : " " + c));
     t.btn.setAttribute("aria-current", String(s.id === state.selected));
     setText(t.title, s.title);
-    setText(t.chip, s.bucket.replace("_", " ") + " · " + s.status);
+    setText(t.chip, stateLabel(s, c));
     t.pill.hidden = c === "fresh";
     setClass(t.pill, "pill " + (c === "suspect" ? "suspect" : "stale"));
-    setText(t.pill, c === "suspect" ? "timestamp suspect" : c === "none" ? "no time" : "stale");
+    setText(t.pill, c === "suspect" ? "timestamp suspect" : c === "none" ? "no time" : c === "notlive" ? NOT_LIVE[feedHealth()] : "stale");
     setText(t.upd, s.updated != null ? clock(s.updated) : "unknown");
     setText(t.ago, s.updated != null ? ago(s.updated) : "no timestamp from source");
   }
@@ -442,7 +481,8 @@ dd.bad { color: var(--bad); }
       ? "Sessions: " + cur.sessions.length + " shown, more exist and are not loaded, most recently updated first"
       : "Sessions: " + cur.sessions.length + ", most recently updated first");
     if (cur.sessions.length === 0) {
-      stripPlaceholder("zero", function (s) { var e = el("div", "empty", "The connector answered with zero sessions for this account."); e.style.flex = "1 1 100%"; s.appendChild(e); });
+      var zeroText = cur === state.live ? "The connector answered with zero sessions for this account." : "The stored snapshot holds zero sessions. It is not a live answer.";
+      stripPlaceholder("zero|" + zeroText, function (s) { var e = el("div", "empty", zeroText); e.style.flex = "1 1 100%"; s.appendChild(e); });
       return;
     }
     if (stripKey !== "tabs") { stripKey = "tabs"; tabs = {}; strip.textContent = ""; }
@@ -505,16 +545,17 @@ dd.bad { color: var(--bad); }
   function updatePanel(s) {
     var r = panelRef;
     setText(r.h2, s.title);
-    var c = ageClass(s.updated), upd;
+    var c = rowClass(s), upd;
     if (s.updated == null) upd = "no timestamp from source";
     else {
       upd = clock(s.updated) + " " + TZ + " · " + ago(s.updated);
       if (c === "stale") upd += " · STALE";
+      if (c === "notlive") upd += " · " + NOT_LIVE[feedHealth()].toUpperCase() + ", so this is not confirmed current";
       if (c === "suspect") upd += " · TIMESTAMP SUSPECT: ahead of this device's clock, so it may be clock skew";
     }
     setText(r.updated.dd, upd);
     setClass(r.updated.dd, c === "suspect" ? "bad" : "");
-    setText(r.state.dd, s.bucket.replace("_", " ") + " · " + s.status);
+    setText(r.state.dd, stateLabel(s, c));
     setText(r.started.dd, s.created != null ? clock(s.created) + " " + TZ : "unknown");
     setText(r.summary.dd, s.summary || "The source gave no summary for this session.");
     r.needs.dt.hidden = r.needs.dd.hidden = !s.needs;
@@ -534,8 +575,10 @@ dd.bad { color: var(--bad); }
   /* ---------- messages ---------- */
   function eventsSignature(ev) {
     if (!state.mcp) return "nomcp";
+    if (state.eventsBlocked) return "blocked|" + state.eventsBlocked.code;
     if (!ev) return "none";
-    return JSON.stringify([ev.status, ev.refreshing, ev.refreshError, ev.error, ev.hasMore, ev.total, ev.items && ev.items.map(function (m) { return [m.role, m.at, m.text]; })]);
+    // "refreshing" and fetch time are shown through the footer text, so they must not rebuild the messages.
+    return JSON.stringify([ev.status, ev.refreshError, ev.error, ev.hasMore, ev.total, ev.items && ev.items.map(function (m) { return [m.role, m.at, m.text, m.sub]; })]);
   }
   function renderEvents() {
     var r = panelRef; if (!r) return;
@@ -545,6 +588,8 @@ dd.bad { color: var(--bad); }
       var box = r.events; box.textContent = "";
       if (!state.mcp) {
         box.appendChild(el("div", "empty", "Messages are read live from Claude Code Remote, and the connector is not available in this view. Use the open button to read the session."));
+      } else if (state.eventsBlocked) {
+        box.appendChild(el("div", "empty", "Messages read earlier were removed because this view lost access to Claude Code Remote. " + state.eventsBlocked.message));
       } else if (!ev || ev.status === "loading") {
         for (var i = 0; i < 3; i++) { var k = el("div", "skel"); k.style.cssText = "height:56px;flex:none"; box.appendChild(k); }
       } else if (ev.status === "error") {
@@ -564,14 +609,15 @@ dd.bad { color: var(--bad); }
         }
         if (ev.items.length === 0) {
           box.appendChild(el("div", "empty", ev.hasMore
-            ? "None of the newest " + EVENT_WINDOW + " events were user or assistant messages. Older events exist and were not read."
-            : "This session has no user or assistant messages."));
+            ? "No user or assistant text was found in the newest " + EVENT_WINDOW + " events. They may be tool activity. Older events exist and were not read."
+            : "No user or assistant text was found in this session's events."));
         }
         ev.items.forEach(function (m) {
           var d = el("div", "ev " + m.role);
           var meta = el("div", "meta");
           meta.appendChild(el("span", null, m.role));
           meta.appendChild(el("span", "tnum", m.at != null ? clock(m.at) + " · " + ago(m.at) : "no timestamp"));
+          if (m.sub) meta.appendChild(el("span", null, "subagent"));
           if (m.synthetic) meta.appendChild(el("span", null, "automatic"));
           d.appendChild(meta); d.appendChild(el("div", "txt", m.text)); box.appendChild(d);
         });
@@ -584,7 +630,7 @@ dd.bad { color: var(--bad); }
       var trunc = ev.total === 0 ? (ev.hasMore ? more.trim() : "No messages.")
         : ev.hasMore ? "Newest " + (ev.total > ev.items.length ? ev.items.length + " of " + ev.total + " found" : ev.total + " found") + " in the newest " + EVENT_WINDOW + " events." + more
         : ev.total > ev.items.length ? "Newest " + ev.items.length + " of " + ev.total + " messages." : "All " + ev.total + " messages.";
-      setText(r.evAge, "Read at " + clock(ev.fetchedAt) + " (" + ago(ev.fetchedAt) + (ev.refreshing ? ", refreshing" : "") + "). " + trunc);
+      setText(r.evAge, (ev.fetchedAt == null ? "Read time unknown" : "Read at " + clock(ev.fetchedAt) + " (" + ago(ev.fetchedAt) + (ev.refreshing ? ", refreshing" : "") + ")") + ". " + trunc);
     }
   }
 
@@ -608,7 +654,8 @@ dd.bad { color: var(--bad); }
       var text = textOf(msg.content).trim();
       if (!text) return;
       if (text.length > 700) text = text.slice(0, 700) + "…";
-      out.push({ role: role, text: text, at: ms(e.created_at), synthetic: !!inner.isSynthetic });
+      var sub = body.agent_id || inner.agent_id || body.parent_tool_use_id || inner.parent_tool_use_id;
+      out.push({ role: role, text: text, at: ms(e.created_at), synthetic: !!inner.isSynthetic, sub: !!sub });
     });
     out.sort(function (x, y) { return (y.at || 0) - (x.at || 0); });
     return { items: out, hasMore: !!((p && p.ccr && p.ccr.has_more) || (p && p.has_more)) };
@@ -616,24 +663,31 @@ dd.bad { color: var(--bad); }
   function errOf(e) { return { code: (e && e.code) || "error", message: (e && e.message) || String(e) }; }
 
   function loadEvents(id, force) {
-    if (!state.mcp || state.halted) return;
+    if (!state.mcp || state.halted || state.eventsBlocked) return;
     var prev = state.events[id];
-    if (!force && prev && prev.status === "ok" && !prev.refreshing && Date.now() - prev.fetchedAt < 5000) return;
+    if (!force && prev && prev.status === "ok" && !prev.refreshing && prev.fetchedAt != null && Date.now() - prev.fetchedAt < 5000) return;
     if (prev && prev.status === "ok") state.events[id] = Object.assign({}, prev, { refreshing: true, refreshError: null });
     else state.events[id] = { status: "loading" };
     if (panelRef && panelRef.id === id) renderEvents();
-    state.mcp.callTool(SERVER, "list_events", { session_id: id, kinds: ["user", "assistant"], limit: EVENT_WINDOW }, { cache: { staleTime: 4000, gcTime: 60000 } })
+    // Refresh and Try again must reach the connector, not the 4 s call cache.
+    state.mcp.callTool(SERVER, "list_events", { session_id: id, kinds: ["user", "assistant"], limit: EVENT_WINDOW }, { cache: { staleTime: 4000, gcTime: 60000, refresh: !!force } })
       .then(function (res) {
+        if (state.eventsBlocked || state.halted) return;   // access was lost while this call was in flight
         var parsed = parseEvents(res.payload);
         state.events[id] = {
           status: "ok", items: parsed.items.slice(0, EVENT_SHOWN), total: parsed.items.length, hasMore: parsed.hasMore,
-          fetchedAt: (res.cache && res.cache.storedAt) || Date.now()
+          fetchedAt: res.cache ? okTime(res.cache.storedAt) : Date.now()
         };
       })
       .catch(function (e) {
+        var d = describe(e);
+        // Authorization loss and account change are connector-wide: same handling as the sessions feed.
+        // approval_required stays local because only this call needs the approval.
+        if (d.code === "user_changed" || (d.retract && !d.approval)) { setLiveError(e); return; }
+        if (state.eventsBlocked || state.halted) return;
         var now = state.events[id];
-        if (now && now.status === "ok") state.events[id] = Object.assign({}, now, { refreshing: false, refreshError: errOf(e) });
-        else state.events[id] = { status: "error", error: errOf(e) };
+        if (now && now.status === "ok") state.events[id] = Object.assign({}, now, { refreshing: false, refreshError: { code: d.code, message: d.message } });
+        else state.events[id] = { status: "error", error: { code: d.code, message: d.message } };
       })
       .then(function () { if (panelRef && panelRef.id === id) renderEvents(); });
   }
@@ -645,7 +699,9 @@ dd.bad { color: var(--bad); }
     renderStrip(); renderPanel();
     if (state.mcp) loadEvents(id, false);
     var p = $("panel");
-    if (p.scrollIntoView) { try { p.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (e) {} }
+    var calm = false;
+    try { calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    if (p.scrollIntoView) { try { p.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" }); } catch (e) {} }
   }
 
   /* ---------- feeds ---------- */
@@ -666,27 +722,36 @@ dd.bad { color: var(--bad); }
   function handleLive(res) {
     var list = extractList(res && res.payload);
     var rows = processRows(list.rows);
-    state.live = { sessions: rows.sessions, dropped: rows.dropped, hasMore: list.hasMore, asOf: (res.cache && res.cache.storedAt) || Date.now() };
+    // A cache marker with no usable storedAt leaves the data time unknown rather than "now".
+    state.live = { sessions: rows.sessions, dropped: rows.dropped, hasMore: list.hasMore, asOf: res.cache ? okTime(res.cache.storedAt) : Date.now() };
     state.error = null; state.refreshError = null; state.liveSettled = true;
+    state.eventsBlocked = null;
     afterData();
   }
-  function setLiveError(e) {
+  // userAttempt: the viewer pressed a button, so a repeat of the same failure still gets a visible new message.
+  function setLiveError(e, userAttempt) {
     var d = describe(e);
+    if (userAttempt) d.at = Date.now();
     state.error = d; state.liveSettled = true;
-    if (d.retract) state.live = null;
-    if (d.code === "user_changed") { state.halted = true; state.live = null; state.snap = null; if (state.unwatch) state.unwatch(); }
+    if (d.retract) {
+      // Rows and messages that came through a connector the view can no longer use must not stay on screen.
+      state.live = null; state.events = {}; state.eventsBlocked = d;
+    }
+    if (d.code === "user_changed") { state.halted = true; state.live = null; state.snap = null; state.events = {}; if (state.unwatch) state.unwatch(); }
     afterData();
   }
-  function onWatch(ev) {
-    if (state.halted) return;
-    try {
-      if (ev.type === "data") handleLive(ev.result); else setLiveError(ev.error);
-    } catch (e) {
-      // The page could not make sense of the answer: say so, and take the Live badge down.
+  // Runs fn; if it throws, the page says it could not read the answer and the Live badge comes down.
+  function guarded(fn) {
+    try { fn(); }
+    catch (e) {
       state.error = { code: "unreadable_answer", message: "The connector answered, but " + (e && e.message ? e.message : "the page could not read it") + "." };
       state.liveSettled = true;
       afterData();
     }
+  }
+  function onWatch(ev) {
+    if (state.halted) return;
+    guarded(function () { if (ev.type === "data") handleLive(ev.result); else setLiveError(ev.error); });
   }
 
   function startLive(mcp) {
@@ -707,7 +772,7 @@ dd.bad { color: var(--bad); }
   }
   function loadSnapshot(db) {
     var ref;
-    try { ref = db.collection("snapshots").doc("latest"); } catch (e) { setSnapError("snapshot_read_failed", "The stored snapshot could not be opened: " + errOf(e).message); return; }
+    try { ref = db.collection("snapshots").doc("latest"); } catch (e) { setSnapError(dbCode(e), "The stored snapshot could not be opened" + dbWhy(e)); return; }
     ref.get().then(function (snap) {
       if (!snap.exists) { setSnapError("snapshot_absent", "No snapshot has been stored for this page yet."); return; }
       var d = snap.data();
@@ -718,8 +783,11 @@ dd.bad { color: var(--bad); }
       state.snap = { sessions: rows.sessions, dropped: rows.dropped, hasMore: !!d.hasMore, asOf: at };
       state.snapError = null; state.snapSettled = true;
       afterData();
-    }).catch(function (e) { setSnapError("snapshot_read_failed", "Reading the stored snapshot failed: " + errOf(e).message); });
+    }).catch(function (e) { setSnapError(dbCode(e), "Reading the stored snapshot failed" + dbWhy(e)); });
   }
+  // Keep the database's own error code so a refusal, a lapse and a network failure stay distinguishable.
+  function dbCode(e) { return (e && e.code) || "snapshot_read_failed"; }
+  function dbWhy(e) { var x = errOf(e); return " (" + x.code + "): " + x.message; }
 
   function boot() {
     var cl = window.claude;
@@ -737,7 +805,7 @@ dd.bad { color: var(--bad); }
     cl.use("db").then(function (db) {
       if (db) loadSnapshot(db);
       else setSnapError("db_unavailable", "Stored data is not available in this view (signed out, or the page database is off).");
-    }, function (e) { setSnapError("snapshot_read_failed", "Stored data could not be reached: " + errOf(e).message); });
+    }, function (e) { setSnapError(dbCode(e), "Stored data could not be reached" + dbWhy(e)); });
 
     setTimeout(function () {
       if (!state.liveSettled) { state.error = { code: "no_answer", message: "The connector did not answer within " + (NO_ANSWER_MS / 1000) + " seconds." }; state.liveSettled = true; }
