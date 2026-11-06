@@ -4,6 +4,7 @@ export type ClaudeSignInState =
   | { status: "idle" }
   | { status: "opening" }
   | { status: "opened" }
+  | { status: "not-yet" }
   | { status: "recheck-failed" }
   | { status: "failed"; message: string };
 
@@ -36,9 +37,11 @@ export default function DesktopRuntimeNotice({
         ? "Opening Terminal for Claude sign-in…"
         : signIn.status === "opened"
           ? "Finish signing in to Claude in Terminal. This panel updates when you come back."
-          : signIn.status === "recheck-failed"
-            ? "Fogbreak couldn't re-check the Claude sign-in. Try again, or switch back here and it will look again."
-            : message;
+          : signIn.status === "not-yet"
+            ? "Claude isn't signed in yet. This panel looks again when you come back."
+            : signIn.status === "recheck-failed"
+              ? "Fogbreak couldn't re-check the Claude sign-in. Try again, or switch back here and it will look again."
+              : message;
   if (!text) return null;
   const retry = canRetry || signIn.status === "recheck-failed";
   return (
