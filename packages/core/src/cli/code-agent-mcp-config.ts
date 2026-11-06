@@ -146,10 +146,17 @@ export function codexMcpConfigArgs(
   const args: string[] = [];
   for (const [key, server] of codeAgentHttpMcpServers(config, environment)) {
     args.push("-c", `mcp_servers.${key}.url=${tomlString(server.url)}`);
-    if (server.headers && Object.keys(server.headers).length > 0) {
+    if (server.bearerTokenEnvVar) {
       args.push(
         "-c",
-        `mcp_servers.${key}.http_headers=${tomlInlineTable(server.headers)}`,
+        `mcp_servers.${key}.bearer_token_env_var=${tomlString(server.bearerTokenEnvVar)}`,
+      );
+    }
+    const headers = codexStaticHeaders(server);
+    if (Object.keys(headers).length > 0) {
+      args.push(
+        "-c",
+        `mcp_servers.${key}.http_headers=${tomlInlineTable(headers)}`,
       );
     }
     if (server.startupTimeoutSec !== undefined) {
@@ -169,6 +176,24 @@ export function codexMcpConfigArgs(
     }
   }
   return args;
+}
+
+/**
+ * The environment a Codex child needs next to `codexMcpConfigArgs`: the bearer
+ * tokens it reads by variable name instead of from its command line. Merge it
+ * into that child's environment only; never log it.
+ */
+export function codexMcpChildEnv(
+  config: McpConfig | null = null,
+  environment: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const childEnv: Record<string, string> = {};
+  for (const [, server] of codeAgentHttpMcpServers(config, environment)) {
+    if (server.bearerTokenEnvVar && server.bearerToken) {
+      childEnv[server.bearerTokenEnvVar] = server.bearerToken;
+    }
+  }
+  return childEnv;
 }
 
 /**
@@ -218,11 +243,29 @@ export function codeAgentMcpConfigurationErrors(
 interface CodexServerSettings {
   startupTimeoutSec?: number;
   approveTools?: boolean;
+  /** Codex reads this variable for the bearer instead of an argv header. */
+  bearerTokenEnvVar?: string;
+  bearerToken?: string;
+}
+
+function codexTokenEnvVar(key: string): string {
+  return `AGENT_NATIVE_MCP_${key.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_TOKEN`;
+}
+
+function codexStaticHeaders(server: {
+  headers?: Record<string, string>;
+  bearerTokenEnvVar?: string;
+}): Record<string, string> {
+  const headers = { ...(server.headers ?? {}) };
+  if (server.bearerTokenEnvVar) delete headers.Authorization;
+  return headers;
 }
 
 /**
  * An MCP_SERVERS entry may carry Codex-only settings next to its url. A bad
- * value is a configuration error, not something to drop silently.
+ * value is a configuration error, not something to drop silently. Only
+ * entries that arrived through the MCP_SERVERS environment, which the desktop
+ * fills, are asked; a repo's mcp.config.json cannot grant itself tool approval.
  */
 function codexServerSettings(
   serverId: string,
@@ -272,6 +315,8 @@ function codeAgentHttpMcpServers(
   // Both CLIs need a sanitized key, and a lossy key would let one server (and
   // its credential headers) silently replace another. Reject that instead.
   const idsByKey = new Map<string, string>();
+  const idsByTokenVar = new Map<string, string>();
+  const injectedIds = new Set(Object.keys(parseMcpServers(environment)));
   return Object.entries(servers).flatMap(([serverId, server]) => {
     // A workspace-connection server's bearer is resolved per request inside
     // this process, so a CLI copy would have no credentials.
@@ -290,13 +335,31 @@ function codeAgentHttpMcpServers(
       );
     }
     idsByKey.set(key, serverId);
+    const injected = injectedIds.has(serverId);
+    const bearer = injected
+      ? /^Bearer\s+(\S+)$/.exec(server.headers?.Authorization ?? "")?.[1]
+      : undefined;
+    let bearerTokenEnvVar: string | undefined;
+    if (bearer) {
+      bearerTokenEnvVar = codexTokenEnvVar(key);
+      const sharer = idsByTokenVar.get(bearerTokenEnvVar);
+      if (sharer !== undefined) {
+        throw new Error(
+          `MCP server IDs "${sharer}" and "${serverId}" would share the token variable ${bearerTokenEnvVar}. Rename one of them.`,
+        );
+      }
+      idsByTokenVar.set(bearerTokenEnvVar, serverId);
+    }
     return [
       [
         key,
         {
           url: server.url,
           headers: server.headers,
-          ...codexServerSettings(serverId, server),
+          ...(injected ? codexServerSettings(serverId, server) : {}),
+          ...(bearer && bearerTokenEnvVar
+            ? { bearerTokenEnvVar, bearerToken: bearer }
+            : {}),
         },
       ],
     ];

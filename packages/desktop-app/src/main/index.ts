@@ -262,11 +262,7 @@ import { contentFilesWebviewDenialReason } from "./content-files-webview-access.
 import { deriveContentFilesRepositoryIdentity } from "./content-files/local-identity";
 import { readCookieHeaderForUrl } from "./cookie-header.js";
 import { DesktopDesignPreviewManager } from "./design-preview-manager";
-import {
-  boundAppIdFromRunMetadata,
-  resolveDesktopAppMcpServer,
-  type DesktopMcpNotice,
-} from "./desktop-app-mcp-servers.js";
+import type { DesktopMcpNotice } from "./desktop-app-mcp-servers.js";
 import { captureDesktopBrowserScreenshot } from "./desktop-browser-screenshot";
 import {
   DESKTOP_IDENTITY_PARTITION,
@@ -288,6 +284,12 @@ import {
   type DesktopNavigationShortcutInput,
   type DesktopNavigationShortcutSource,
 } from "./desktop-navigation-shortcuts.js";
+import {
+  prepareRunMcp,
+  releaseAbandonedRunStart,
+  resolveWorkspaceAppMcpServers,
+  type DesktopWorkspaceApp,
+} from "./desktop-run-mcp.js";
 import {
   desktopRequestedUserDataPath,
   initializeDesktopStartup,
@@ -5875,6 +5877,13 @@ const songStudioLocalSession = createSongStudioLocalSession({
     warmSongStudioMcp({
       readCookies: () =>
         cookieHeaderForRelay(songStudioPartition(), FOGBREAK_SONG_STUDIO_URL),
+      refreshCookies: async () => {
+        await songStudioLocalSession.ensure(true);
+        return cookieHeaderForRelay(
+          songStudioPartition(),
+          FOGBREAK_SONG_STUDIO_URL,
+        );
+      },
       log: songStudioLog,
     }),
   log: songStudioLog,
@@ -5934,39 +5943,39 @@ async function desktopCodeAgentMcpEnvironment(
     };
   }
 
+  const apps: DesktopWorkspaceApp[] = [];
   for (const appConfig of loadAppsForAuthContext()) {
     if (appConfig.enabled === false) continue;
     const baseUrl = resolveAppBaseUrl(appConfig);
-    if (!baseUrl) continue;
-    const serverId = desktopCodeAgentMcpServerId(appConfig.id);
-    const appMcpUrl = desktopAppMcpUrl(baseUrl);
-    const appSession = session.fromPartition(`persist:app-${appConfig.id}`);
-    const cookieHeader = await cookieHeaderForRelay(appSession, appMcpUrl);
-    const resolution = await resolveDesktopAppMcpServer({
-      app: { id: appConfig.id, name: appConfig.name },
-      serverId,
-      mcpUrl: appMcpUrl,
-      cookieHeader,
-      boundAppId: options.boundAppId,
-      songStudio: {
-        prepare: async () => {
-          await ensureSongStudioLocalSession();
-          return prepareSongStudioMcp({
-            readCookies: () => cookieHeaderForRelay(appSession, baseUrl),
-            songStudioUrl: baseUrl,
-            log: songStudioLog,
-          });
-        },
-      },
-    });
-    if (resolution.state === "omitted") {
-      if (resolution.notice) notices.push(resolution.notice);
-      continue;
-    }
-    servers[serverId] = resolution.server;
-    allowlist.add(serverId);
-    appIds.push(appConfig.id);
+    if (baseUrl) apps.push({ id: appConfig.id, name: appConfig.name, baseUrl });
   }
+  const resolved = await resolveWorkspaceAppMcpServers({
+    apps,
+    boundAppId: options.boundAppId,
+    serverIdFor: desktopCodeAgentMcpServerId,
+    mcpUrlFor: desktopAppMcpUrl,
+    readCookieHeader: (appId, mcpUrl) =>
+      cookieHeaderForRelay(
+        session.fromPartition(`persist:app-${appId}`),
+        mcpUrl,
+      ),
+    prepareSong: async (baseUrl) => {
+      await ensureSongStudioLocalSession();
+      return prepareSongStudioMcp({
+        readCookies: () => cookieHeaderForRelay(songStudioPartition(), baseUrl),
+        refreshCookies: async () => {
+          await ensureSongStudioLocalSession(true);
+          return cookieHeaderForRelay(songStudioPartition(), baseUrl);
+        },
+        songStudioUrl: baseUrl,
+        log: songStudioLog,
+      });
+    },
+  });
+  Object.assign(servers, resolved.servers);
+  for (const serverId of Object.keys(resolved.servers)) allowlist.add(serverId);
+  appIds.push(...resolved.appIds);
+  notices.push(...resolved.notices);
 
   return {
     env: {
@@ -6060,6 +6069,25 @@ function getCodeAgentChildEnvironment(
   const environment: NodeJS.ProcessEnv = {};
   for (const source of sources) Object.assign(environment, source);
   return withResolvedExecutablePaths(environment, LOCAL_CODE_AGENT_EXECUTABLES);
+}
+
+function releaseCodeAgentRunLeaseDirectly(
+  runId: string,
+  worktreeId: string,
+): void {
+  try {
+    releaseCodeAgentWorktree({
+      registryPath: codeAgentWorktreeRegistryFile(),
+      worktreeId,
+      runId,
+    });
+    void startNextQueuedCodeAgentWorktreeRun(worktreeId);
+  } catch (error) {
+    console.warn(
+      "[code-agents] could not release the worktree of a run stopped before it started:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 async function spawnCodeAgentRunner(
@@ -6177,17 +6205,29 @@ async function spawnCodeAgentRunner(
         error instanceof Error ? error.message : error,
       );
     });
-    const mcpEnvironment = await desktopCodeAgentMcpEnvironment(cwd, {
-      includeWorkspaceApps: true,
-      boundAppId: boundAppIdFromRunMetadata(runRecord?.metadata),
+    const prepared = await prepareRunMcp({
+      runMetadata: runRecord?.metadata,
+      readRecord: () => readCodeAgentRunRecord(runId),
+      build: (boundAppId) =>
+        desktopCodeAgentMcpEnvironment(cwd, {
+          includeWorkspaceApps: true,
+          boundAppId,
+        }),
+      announce: (message, metadata) =>
+        appendCodeAgentStatusEvent(runId, message, metadata),
+      release: (record) =>
+        releaseAbandonedRunStart({
+          runId,
+          worktreeId,
+          record,
+          startingRuns: startingCodeAgentRuns,
+          isTerminal: isTerminalCodeAgentRun,
+          reclaimTerminal: reclaimTerminalCodeAgentWorktree,
+          releaseLease: (id) => releaseCodeAgentRunLeaseDirectly(runId, id),
+        }),
     });
-    for (const notice of mcpEnvironment.notices) {
-      appendCodeAgentStatusEvent(runId, notice.message, {
-        source: "desktop-mcp-config",
-        serverId: notice.serverId,
-        reason: notice.reason,
-      });
-    }
+    if (prepared.state === "abandoned") return;
+    const mcpEnvironment = prepared.mcp;
     const computerEnv = desktopComputerChildEnv(
       runId,
       normalizedPermissionMode,

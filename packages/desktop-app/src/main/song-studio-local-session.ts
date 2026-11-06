@@ -165,6 +165,11 @@ export interface SongStudioMintOptions {
   /** No attempt starts, or waits, past this instant (`now()` scale). */
   deadlineAt?: number;
   now?: () => number;
+  /**
+   * Called at most once, when Song answers 401 or 403: signs in again and
+   * returns the fresh cookie header for one more attempt.
+   */
+  refreshCookies?: () => Promise<string>;
 }
 
 type MintAttempt =
@@ -281,6 +286,8 @@ export async function mintSongStudioMcpEntry(
 
   let attempts = 0;
   let lastReason: SongStudioMcpUnavailableReason = "timed-out";
+  let refreshed = false;
+  let cookies = cookieHeader;
   for (;;) {
     const remainingMs =
       options.deadlineAt === undefined
@@ -293,7 +300,7 @@ export async function mintSongStudioMcpEntry(
     const attempt = await mintOnce(
       target,
       base.origin,
-      cookieHeader,
+      cookies,
       fetchImpl,
       createTimeoutSignal(remainingMs),
     );
@@ -301,6 +308,16 @@ export async function mintSongStudioMcpEntry(
       return { state: "minted", entry: attempt.entry };
     }
     lastReason = attempt.reason;
+    if (
+      attempt.reason === "rejected" &&
+      (attempt.status === 401 || attempt.status === 403) &&
+      options.refreshCookies &&
+      !refreshed
+    ) {
+      refreshed = true;
+      cookies = await options.refreshCookies();
+      continue;
+    }
     if (!attempt.retryable || attempts >= maxAttempts) {
       return {
         state: "unavailable",
@@ -351,6 +368,8 @@ export type SongStudioReadyResult =
 
 export interface SongStudioPrepareDeps {
   readCookies: () => Promise<string>;
+  /** Signs in again and reads the new cookies; see `refreshCookies`. */
+  refreshCookies?: () => Promise<string>;
   songStudioUrl?: string;
   fetchImpl?: typeof fetch;
   log?: SongStudioLog;
@@ -381,7 +400,12 @@ export async function prepareSongStudioMcp(
     await deps.readCookies(),
     songStudioUrl,
     fetchImpl,
-    { ...deps.options, deadlineAt, now },
+    {
+      ...deps.options,
+      deadlineAt,
+      now,
+      ...(deps.refreshCookies ? { refreshCookies: deps.refreshCookies } : {}),
+    },
   );
   if (minted.state !== "minted") {
     log("song readiness: connection entry not minted", {
@@ -436,7 +460,7 @@ export async function prepareSongStudioMcp(
       signal: createTimeoutSignal(remainingMs),
     });
     await response.body?.cancel().catch(() => undefined);
-    if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
       log("song readiness: MCP initialize refused", {
         reason: "rejected",
         status: response.status,
@@ -448,7 +472,15 @@ export async function prepareSongStudioMcp(
         status: response.status,
       };
     }
-    log("song readiness: Song Studio MCP answered");
+    // Any other answer means the route is up. The ping is only a warm-up, so a
+    // status it dislikes (a 406 for its Accept header) must not remove tools
+    // the CLI would have reached.
+    log(
+      response.ok
+        ? "song readiness: Song Studio MCP answered"
+        : "song readiness: MCP initialize answered with a non-success status; continuing",
+      response.ok ? {} : { status: response.status },
+    );
     return { state: "ready", entry: minted.entry };
   } catch (error) {
     const reason = isTimeoutError(error) ? "timed-out" : "unreachable";

@@ -645,7 +645,7 @@ describe("executeCodeAgentRun", () => {
         "#!/usr/bin/env node",
         "const fs = require('fs');",
         "const args = process.argv.slice(2);",
-        `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + '\\n');`,
+        `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, tokenInEnv: process.env.AGENT_NATIVE_MCP_DESKTOP_APP_SONG_STUDIO_TOKEN === 'fake-test-token' }) + '\\n');`,
         "const outIndex = args.indexOf('--output-last-message');",
         "if (outIndex !== -1) fs.writeFileSync(args[outIndex + 1], 'ok');",
       ].join("\n"),
@@ -688,20 +688,27 @@ describe("executeCodeAgentRun", () => {
       .readFileSync(logPath, "utf8")
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as string[]);
+      .map(
+        (line) => JSON.parse(line) as { args: string[]; tokenInEnv: boolean },
+      );
+    const tokenInEnv = invocations.map((invocation) => invocation.tokenInEnv);
+    const calls = invocations.map((invocation) => invocation.args);
     const modeOf = (args: string[]) => args[args.indexOf("--sandbox") + 1];
     const approves = (args: string[]) =>
       args.includes(
         'mcp_servers.desktop_app_song_studio.default_tools_approval_mode="approve"',
       );
-    expect(invocations.map(modeOf)).toEqual([
+    expect(calls.map(modeOf)).toEqual([
       "workspace-write",
       "read-only",
       "workspace-write",
     ]);
-    expect(invocations.map(approves)).toEqual([true, false, true]);
+    expect(calls.map(approves)).toEqual([true, false, true]);
+    // The token reaches Codex through its environment, never its command line.
+    expect(tokenInEnv).toEqual([true, true, true]);
+    expect(JSON.stringify(calls)).not.toContain("fake-test-token");
     // The startup budget is not a permission; every invocation keeps it.
-    for (const args of invocations) {
+    for (const args of calls) {
       expect(args).toContain(
         "mcp_servers.desktop_app_song_studio.startup_timeout_sec=90",
       );

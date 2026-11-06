@@ -1,9 +1,14 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import type { McpConfig } from "../mcp-client/config.js";
+import { loadMcpConfig, type McpConfig } from "../mcp-client/config.js";
 import {
   claudeMcpConfig,
   codeAgentMcpConfigurationErrors,
+  codexMcpChildEnv,
   codexMcpConfigArgs,
   mergeCodeAgentMcpConfig,
   restrictCodeAgentMcpConfig,
@@ -413,12 +418,99 @@ describe("Codex settings carried by an MCP_SERVERS entry", () => {
       "-c",
       'mcp_servers.desktop_app_song_studio.url="http://127.0.0.1:8100/song-studio/mcp"',
       "-c",
-      'mcp_servers.desktop_app_song_studio.http_headers={"Authorization"="Bearer fake-test-token"}',
+      'mcp_servers.desktop_app_song_studio.bearer_token_env_var="AGENT_NATIVE_MCP_DESKTOP_APP_SONG_STUDIO_TOKEN"',
       "-c",
       "mcp_servers.desktop_app_song_studio.startup_timeout_sec=90",
       "-c",
       'mcp_servers.desktop_app_song_studio.default_tools_approval_mode="approve"',
     ]);
+  });
+
+  it("keeps the bearer token out of argv and hands it over by variable name", () => {
+    const args = codexMcpConfigArgs(null, envWith(songEntry), {
+      permissionMode: "full-auto",
+    });
+    expect(JSON.stringify(args)).not.toContain("fake-test-token");
+    expect(args.join("\n")).not.toContain("http_headers");
+    expect(codexMcpChildEnv(null, envWith(songEntry))).toEqual({
+      AGENT_NATIVE_MCP_DESKTOP_APP_SONG_STUDIO_TOKEN: "fake-test-token",
+    });
+  });
+
+  it("moves only the bearer into the environment and keeps other headers", () => {
+    const env = envWith({
+      ...songEntry,
+      headers: { Authorization: "Bearer fake-test-token", "X-Trace": "t1" },
+    });
+    expect(codexMcpConfigArgs(null, env).join("\n")).toContain(
+      'mcp_servers.desktop_app_song_studio.http_headers={"X-Trace"="t1"}',
+    );
+  });
+
+  it("keeps an argv header for a server that did not arrive through MCP_SERVERS", () => {
+    const fileConfig: McpConfig = {
+      servers: {
+        repoServer: {
+          type: "http",
+          url: "https://repo.example/mcp",
+          headers: { Authorization: "Bearer repo-token" },
+        },
+      },
+    };
+    expect(codexMcpConfigArgs(fileConfig, {} as NodeJS.ProcessEnv)).toEqual([
+      "-c",
+      'mcp_servers.repoServer.url="https://repo.example/mcp"',
+      "-c",
+      'mcp_servers.repoServer.http_headers={"Authorization"="Bearer repo-token"}',
+    ]);
+    expect(codexMcpChildEnv(fileConfig, {} as NodeJS.ProcessEnv)).toEqual({});
+  });
+
+  it("never lets a repo's mcp.config.json grant itself approval or a startup budget", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-repo-config-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "mcp.config.json"),
+        JSON.stringify({
+          servers: {
+            repoServer: {
+              type: "http",
+              url: "https://repo.example/mcp",
+              approveTools: true,
+              startupTimeoutSec: 600,
+            },
+          },
+        }),
+      );
+      const loaded = loadMcpConfig(dir);
+      expect(loaded?.servers.repoServer).toBeDefined();
+      const args = codexMcpConfigArgs(loaded, {} as NodeJS.ProcessEnv, {
+        permissionMode: "full-auto",
+      }).join("\n");
+      expect(args).toContain("mcp_servers.repoServer.url=");
+      expect(args).not.toContain("default_tools_approval_mode");
+      expect(args).not.toContain("startup_timeout_sec");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores those settings on a config entry even if one carries them in memory", () => {
+    const fileConfig = {
+      servers: {
+        repoServer: {
+          type: "http",
+          url: "https://repo.example/mcp",
+          approveTools: true,
+          startupTimeoutSec: 600,
+        },
+      },
+    } as unknown as McpConfig;
+    const args = codexMcpConfigArgs(fileConfig, {} as NodeJS.ProcessEnv, {
+      permissionMode: "full-auto",
+    }).join("\n");
+    expect(args).not.toContain("default_tools_approval_mode");
+    expect(args).not.toContain("startup_timeout_sec");
   });
 
   it("adds neither setting for an entry that does not ask for them", () => {

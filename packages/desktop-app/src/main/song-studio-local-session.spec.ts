@@ -543,3 +543,143 @@ describe("song studio readiness before a run", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("song studio readiness ping", () => {
+  const prepare = (initializeAnswer: Response | Error) =>
+    prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      songStudioUrl: SONG_URL,
+      fetchImpl: vi
+        .fn()
+        .mockResolvedValueOnce(mintedResponse())
+        .mockImplementationOnce(async () => {
+          if (initializeAnswer instanceof Error) throw initializeAnswer;
+          return initializeAnswer;
+        }) as never,
+    });
+
+  it("sends only the bearer: no Cookie, nothing but the three request headers", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(mintedResponse())
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    await prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      songStudioUrl: SONG_URL,
+      fetchImpl: fetchImpl as never,
+    });
+    const init = fetchImpl.mock.calls[1]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(Object.keys(headers).sort()).toEqual([
+      "Accept",
+      "Authorization",
+      "Content-Type",
+    ]);
+    expect(headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.stringify(init)).not.toContain("cookie-secret");
+  });
+
+  it("stays ready when the route answers something other than a refusal", async () => {
+    for (const status of [406, 404, 500, 204]) {
+      expect(
+        await prepare(new Response(null, { status })),
+        `status ${status}`,
+      ).toEqual({ state: "ready", entry: MINTED_ENTRY });
+    }
+  });
+
+  it("still leaves Song out on a 401, a 403 or a network failure", async () => {
+    for (const status of [401, 403]) {
+      expect(await prepare(new Response("{}", { status }))).toEqual({
+        state: "unavailable",
+        stage: "initialize",
+        reason: "rejected",
+        status,
+      });
+    }
+    expect(await prepare(new TypeError("fetch failed"))).toEqual({
+      state: "unavailable",
+      stage: "initialize",
+      reason: "unreachable",
+    });
+    expect(await prepare(timeoutError())).toEqual({
+      state: "unavailable",
+      stage: "initialize",
+      reason: "timed-out",
+    });
+  });
+});
+
+describe("song studio re-sign-in on a refused mint", () => {
+  const cookieOf = (call: unknown[]) =>
+    ((call[1] as RequestInit).headers as Record<string, string>).Cookie;
+
+  it("signs in again once and retries the mint with the new cookie", async () => {
+    const refreshCookies = vi.fn(async () => "an_session=fresh");
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }))
+      .mockResolvedValueOnce(mintedResponse());
+    const result = await mintSongStudioMcpEntry(
+      COOKIE,
+      SONG_URL,
+      fetchImpl as never,
+      { refreshCookies },
+    );
+    expect(result).toEqual({ state: "minted", entry: MINTED_ENTRY });
+    expect(refreshCookies).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls.map(cookieOf)).toEqual([
+      COOKIE,
+      "an_session=fresh",
+    ]);
+  });
+
+  it("does it for a 403 too, but only once however often Song refuses", async () => {
+    const refreshCookies = vi.fn(async () => "an_session=fresh");
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 403 }));
+    const result = await mintSongStudioMcpEntry(
+      COOKIE,
+      SONG_URL,
+      fetchImpl as never,
+      { refreshCookies },
+    );
+    expect(result).toMatchObject({
+      state: "unavailable",
+      reason: "rejected",
+      status: 403,
+    });
+    expect(refreshCookies).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not sign in again for any other refusal", async () => {
+    const refreshCookies = vi.fn(async () => "an_session=fresh");
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 404 }));
+    await mintSongStudioMcpEntry(COOKIE, SONG_URL, fetchImpl as never, {
+      refreshCookies,
+    });
+    expect(refreshCookies).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the re-sign-in through the readiness step", async () => {
+    const refreshCookies = vi.fn(async () => "an_session=fresh");
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }))
+      .mockResolvedValueOnce(mintedResponse())
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const result = await prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      refreshCookies,
+      songStudioUrl: SONG_URL,
+      fetchImpl: fetchImpl as never,
+    });
+    expect(result.state).toBe("ready");
+    expect(refreshCookies).toHaveBeenCalledTimes(1);
+  });
+});
