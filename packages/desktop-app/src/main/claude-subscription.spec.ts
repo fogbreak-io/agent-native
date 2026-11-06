@@ -6,10 +6,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_CLAUDE_AUTH_STATUS_TIMEOUT_MS,
+  claudeCliModelOptions,
+  classifyLocalClaudeCli,
   executeClaudeProcess,
   getClaudeSubscriptionLoginLaunchSpec,
   isClaudeSubscriptionStatus,
   readClaudeSubscriptionStatus,
+  type ClaudeCliProbeRun,
   type ClaudeProcessExecutor,
 } from "./claude-subscription.js";
 
@@ -196,6 +199,20 @@ describe("readClaudeSubscriptionStatus", () => {
     },
   );
 
+  it("treats exit 1 with loggedIn:true as unreadable, not as a connection", async () => {
+    const execute: ClaudeProcessExecutor = async () => ({
+      exitCode: 1,
+      stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+      stderr: "",
+    });
+
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
+      connectionState: "error",
+    });
+  });
+
   it("reports a rejected executor as an error", async () => {
     const execute: ClaudeProcessExecutor = async () => {
       throw new Error("spawn exploded");
@@ -371,3 +388,151 @@ function createFakeProcess(): ChildProcess & {
   }) as ChildProcess["kill"];
   return child;
 }
+
+describe("classifyLocalClaudeCli", () => {
+  const versionOk: ClaudeCliProbeRun = {
+    status: 0,
+    stdout: "2.1.318 (Claude Code)",
+    stderr: "",
+  };
+  const statusRun = (
+    status: number | null,
+    body: unknown,
+    error?: ClaudeCliProbeRun["error"],
+  ): ClaudeCliProbeRun => ({
+    status,
+    stdout: typeof body === "string" ? body : JSON.stringify(body),
+    stderr: "",
+    error,
+  });
+
+  it("reports a missing CLI as not available, with no probe state", () => {
+    const probe = classifyLocalClaudeCli(
+      {
+        status: null,
+        stdout: "",
+        stderr: "",
+        error: { code: "ENOENT", message: "spawn claude ENOENT" },
+      },
+      null,
+    );
+    expect(probe).toMatchObject({ available: false, authenticated: false });
+    expect(probe).not.toHaveProperty("runtimeState");
+  });
+
+  it("reports a CLI that could not be run as unreadable, not missing", () => {
+    expect(
+      classifyLocalClaudeCli(
+        {
+          status: null,
+          stdout: "",
+          stderr: "",
+          error: { code: "ETIMEDOUT", message: "spawnSync claude ETIMEDOUT" },
+        },
+        null,
+      ),
+    ).toMatchObject({
+      available: true,
+      authenticated: false,
+      runtimeState: "unreadable",
+    });
+  });
+
+  it.each([
+    {
+      name: "signed out (exit 1 with JSON)",
+      run: statusRun(1, { loggedIn: false, authMethod: "none" }),
+      expected: { authenticated: false, runtimeState: "needs-sign-in" },
+    },
+    {
+      name: "Claude subscription",
+      run: statusRun(0, {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+      }),
+      expected: { authenticated: true, runtimeState: "signed-in" },
+    },
+    {
+      name: "claude.ai login without subscriptionType",
+      run: statusRun(0, { loggedIn: true, authMethod: "claude.ai" }),
+      expected: { authenticated: true, runtimeState: "signed-in" },
+    },
+    {
+      name: "API key",
+      run: statusRun(0, { loggedIn: true, authMethod: "api_key" }),
+      expected: { authenticated: false, runtimeState: "not-subscription" },
+    },
+    {
+      name: "exit 1 with loggedIn:true",
+      run: statusRun(1, { loggedIn: true, authMethod: "claude.ai" }),
+      expected: { authenticated: false, runtimeState: "unreadable" },
+    },
+    {
+      name: "status timed out",
+      run: statusRun(null, ""),
+      expected: { authenticated: false, runtimeState: "unreadable" },
+    },
+    {
+      name: "status output is not JSON",
+      run: statusRun(0, "not json"),
+      expected: { authenticated: false, runtimeState: "unreadable" },
+    },
+  ])("classifies $name", ({ run, expected }) => {
+    expect(classifyLocalClaudeCli(versionOk, run)).toMatchObject({
+      available: true,
+      ...expected,
+    });
+  });
+});
+
+describe("claudeCliModelOptions", () => {
+  const models = ["claude-sonnet-5-5", "claude-opus-4-8"];
+
+  it("has no rows for an uninstalled CLI", () => {
+    expect(
+      claudeCliModelOptions({
+        engine: "claude-cli",
+        supportedModels: models,
+        probe: { available: false, authenticated: false },
+      }),
+    ).toEqual([]);
+  });
+
+  it("marks a signed-in CLI configured, with the subscription label", () => {
+    const [first] = claudeCliModelOptions({
+      engine: "claude-cli",
+      supportedModels: models,
+      probe: {
+        available: true,
+        authenticated: true,
+        runtimeState: "signed-in",
+      },
+    });
+    expect(first).toMatchObject({
+      engine: "claude-cli",
+      configured: true,
+      statusLabel: "Claude subscription",
+      isSubscription: true,
+      runtimeState: "signed-in",
+    });
+  });
+
+  it.each(["needs-sign-in", "not-subscription", "unreadable"] as const)(
+    "passes the %s state through on an unconfigured row",
+    (runtimeState) => {
+      const options = claudeCliModelOptions({
+        engine: "claude-cli",
+        supportedModels: models,
+        probe: { available: true, authenticated: false, runtimeState },
+      });
+      expect(options).toHaveLength(models.length);
+      for (const option of options) {
+        expect(option).toMatchObject({ configured: false, runtimeState });
+        expect(option).not.toHaveProperty("statusLabel");
+        expect(option).not.toHaveProperty("isSubscription");
+      }
+    },
+  );
+});

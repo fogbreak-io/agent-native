@@ -14,7 +14,7 @@ export interface DesktopRuntimeNoticeProps {
   onSignIn: () => void;
 }
 
-/** Plain-words Claude Code state with one sign-in button, shown in an empty app chat. */
+/** Plain-words Claude Code state with one sign-in button, shown above the composer so it stays visible once the thread has messages. */
 export default function DesktopRuntimeNotice({
   message,
   canSignIn,
@@ -33,13 +33,14 @@ export default function DesktopRuntimeNotice({
   return (
     <div
       role={signIn.status === "failed" ? "alert" : "status"}
-      className="flex max-w-[30rem] flex-col items-center gap-2 px-4 text-center text-sm text-muted-foreground"
+      className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
     >
-      <p>{text}</p>
+      <p className="min-w-0 flex-1">{text}</p>
       {canSignIn ? (
         <Button
           size="sm"
           variant="outline"
+          className="shrink-0"
           disabled={signIn.status === "opening"}
           onClick={onSignIn}
         >

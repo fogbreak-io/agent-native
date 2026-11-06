@@ -153,6 +153,17 @@ export function shouldShowDesktopAppChatSidebar(input: {
   return input.desktopIdentityStatus !== "sign-in-required";
 }
 
+const RECHECK_FAILED_MESSAGE =
+  "Fogbreak couldn't re-check the Claude sign-in. Switch back here to try again.";
+
+function hasSignedInClaude(models: readonly CodeAgentModelOption[]): boolean {
+  return models.some(
+    (model) =>
+      model.engine === DESKTOP_LOCAL_AGENT_ENGINE_BY_ID["claude-code"] &&
+      model.configured === true,
+  );
+}
+
 type LocalCodeChangeState =
   | { status: "idle" }
   | { status: "starting"; message?: string }
@@ -326,7 +337,9 @@ export default function DesktopAppChatShell({
           statusLabel: localAgentModelsFailed
             ? "Couldn't check"
             : (model?.statusLabel ??
-              desktopLocalRuntimeStatusLabel(runtimeState ?? "not-installed")),
+              desktopLocalRuntimeStatusLabel(
+                model ? (runtimeState ?? "needs-sign-in") : "not-installed",
+              )),
         };
       }),
     [localAgentModels, localAgentModelsFailed],
@@ -355,7 +368,9 @@ export default function DesktopAppChatShell({
   useEffect(() => {
     if (localAgentModelsLoading || agentChosenRef.current) return;
     if (!defaultLocalAgent) return;
-    setSelectedAgent(defaultLocalAgent);
+    setSelectedAgent((current) =>
+      current === "default" ? defaultLocalAgent : current,
+    );
   }, [defaultLocalAgent, localAgentModelsLoading]);
 
   const claudeAgent = availableAgents.find(
@@ -419,28 +434,44 @@ export default function DesktopAppChatShell({
   );
 
   // The sign-in finishes in Terminal, outside this window: look again when the
-  // person comes back, past the main-process status cache.
+  // person comes back, past the main-process status cache. One look at a time.
+  const recheckingRef = useRef(false);
+  const recheckLocalAgents = useCallback(async () => {
+    if (recheckingRef.current) return;
+    recheckingRef.current = true;
+    try {
+      const result = await window.electronAPI.codeAgents.listModels({
+        refresh: true,
+      });
+      setLocalAgentModels(result.models);
+      setLocalAgentModelsFailed(result.status !== "ok");
+      if (result.status !== "ok") {
+        setClaudeSignIn({ status: "failed", message: RECHECK_FAILED_MESSAGE });
+      } else if (!hasSignedInClaude(result.models)) {
+        // Still signed out: drop "Finish signing in…" and offer the button again.
+        setClaudeSignIn({ status: "idle" });
+      }
+    } catch {
+      setLocalAgentModelsFailed(true);
+      setClaudeSignIn({ status: "failed", message: RECHECK_FAILED_MESSAGE });
+    } finally {
+      recheckingRef.current = false;
+    }
+  }, []);
   useEffect(() => {
     if (claudeSignIn.status !== "opened") return;
-    const lookAgain = () => {
-      void window.electronAPI.codeAgents
-        .listModels({ refresh: true })
-        .then((result) => {
-          setLocalAgentModels(result.models);
-          setLocalAgentModelsFailed(result.status !== "ok");
-        })
-        .catch(() => setLocalAgentModelsFailed(true));
-    };
+    const lookAgain = () => void recheckLocalAgents();
     window.addEventListener("focus", lookAgain);
     return () => window.removeEventListener("focus", lookAgain);
-  }, [claudeSignIn.status]);
+  }, [claudeSignIn.status, recheckLocalAgents]);
 
-  // The person asked to sign in to Claude, so switch to it once it can run.
+  // The person asked to sign in to Claude: once it can run, use it unless they
+  // have picked a runtime themselves.
   useEffect(() => {
     if (claudeSignIn.status === "idle" || !claudeConfigured) return;
     setClaudeSignIn({ status: "idle" });
-    handleAgentChange("claude-code");
-  }, [claudeConfigured, claudeSignIn.status, handleAgentChange]);
+    if (!agentChosenRef.current) setSelectedAgent("claude-code");
+  }, [claudeConfigured, claudeSignIn.status]);
 
   const runtimeNotice = useMemo(
     () =>
@@ -800,7 +831,7 @@ export default function DesktopAppChatShell({
               dynamicSuggestions={false}
               suggestions={[]}
               emptyStateText={`Ask about ${appName}`}
-              emptyStateFooter={
+              composerSlot={
                 runtimeNotice || claudeSignIn.status !== "idle" ? (
                   <DesktopRuntimeNotice
                     {...(runtimeNotice

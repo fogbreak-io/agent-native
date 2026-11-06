@@ -9,7 +9,7 @@ import DesktopAppChatShell from "./DesktopAppChatShell.js";
 type PanelProps = {
   selectedAgent: string;
   availableAgents: unknown[];
-  emptyStateFooter?: React.ReactNode;
+  composerSlot?: React.ReactNode;
   onConnectLocalRuntime: (agent: string) => void;
   children: React.ReactNode;
 };
@@ -27,7 +27,10 @@ vi.mock("@agent-native/toolkit/app/chat", () => ({
         data-testid="pick-claude-row"
         onClick={() => props.onConnectLocalRuntime("claude-code")}
       />
-      <div data-testid="footer">{props.emptyStateFooter}</div>
+      <div data-testid="footer">{props.composerSlot}</div>
+      <span data-testid="empty-footer">
+        {"emptyStateFooter" in props ? "present" : "absent"}
+      </span>
       {props.children}
     </div>
   ),
@@ -265,5 +268,138 @@ describe("desktop app chat Claude Code state", () => {
       .filter((agent: { id: string }) => agent.id !== "default")
       .map((agent: { statusLabel: string }) => agent.statusLabel);
     expect(new Set(labels)).toEqual(new Set(["Couldn't check"]));
+  });
+
+  it("keeps a signed-out Codex as Sign in, not Not installed", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [
+        { ...codexModels[0], configured: false, statusLabel: undefined },
+        ...claudeModels("signed-in"),
+      ],
+    });
+    await mountShell();
+
+    const codex = JSON.parse(text("agents")).find(
+      (agent: { id: string }) => agent.id === "codex",
+    );
+    expect(codex).toMatchObject({ configured: false, statusLabel: "Sign in" });
+  });
+
+  it("keeps the notice in the composer slot, which survives the first message", async () => {
+    await mountShell();
+
+    expect(text("footer")).toContain("not signed in");
+    expect(text("empty-footer")).toBe("absent");
+  });
+
+  it("looks again once at a time", async () => {
+    await mountShell();
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    let release: (value: unknown) => void = () => undefined;
+    listModels.mockImplementation(
+      () => new Promise((resolve) => (release = resolve)),
+    );
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(
+      listModels.mock.calls.filter(([arg]) => arg?.refresh === true),
+    ).toHaveLength(1);
+
+    await act(async () => {
+      release({ status: "ok", models: claudeModels("needs-sign-in") });
+    });
+    await settle();
+  });
+
+  it("shows a failed re-check instead of 'Finish signing in'", async () => {
+    await mountShell();
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    listModels.mockRejectedValue(new Error("ipc failed"));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "couldn't re-check the Claude sign-in",
+    );
+    expect(text("footer")).not.toContain("Finish signing in");
+  });
+
+  it("clears 'Finish signing in' when the person is still signed out after coming back", async () => {
+    await mountShell();
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    expect(text("footer")).toContain("Finish signing in");
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("footer")).not.toContain("Finish signing in");
+    expect(text("footer")).toContain("not signed in");
+    expect(signInButton()).toBeDefined();
+  });
+
+  it("does not override an explicit Codex pick when Claude signs in", async () => {
+    localStorage.setItem("desktop-app-agent:orchestrator", "codex");
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [...codexModels, ...claudeModels("needs-sign-in")],
+    });
+    await mountShell();
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [...codexModels, ...claudeModels("signed-in")],
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("selected")).toBe("codex");
+  });
+
+  it("moves an auto-picked Codex to Claude after the person signs in to Claude", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [...codexModels, ...claudeModels("needs-sign-in")],
+    });
+    await mountShell();
+    expect(text("selected")).toBe("codex");
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [...codexModels, ...claudeModels("signed-in")],
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("selected")).toBe("claude-code");
   });
 });
