@@ -33,7 +33,7 @@ export interface DesktopAppMcpInput {
   serverId: string;
   mcpUrl: string;
   /** The app the run was opened from, when it was opened from one. */
-  boundAppId?: string;
+  boundAppId?: string | undefined;
   /** Browser cookies for `mcpUrl`; empty when the app has no login. */
   cookieHeader: string;
   songStudio: {

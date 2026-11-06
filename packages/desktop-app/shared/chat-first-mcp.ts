@@ -4,6 +4,7 @@ import type {
   TestMcpUrlResult,
 } from "@agent-native/core/client/resources";
 
+// oracle-change(packages/desktop-app/shared/chat-first-mcp.spec.ts): its only subject, the always-unavailable remote MCP state, was removed with its last caller.
 export const CHAT_FIRST_MCP_IPC = {
   LIST: "chat-first:mcp:list",
   CREATE: "chat-first:mcp:create",

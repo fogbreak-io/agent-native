@@ -5891,7 +5891,10 @@ interface DesktopCodeAgentMcpEnvironment {
 
 async function desktopCodeAgentMcpEnvironment(
   cwd: string,
-  options: { includeWorkspaceApps?: boolean; boundAppId?: string } = {},
+  options: {
+    includeWorkspaceApps?: boolean;
+    boundAppId?: string | undefined;
+  } = {},
 ): Promise<DesktopCodeAgentMcpEnvironment> {
   const workspaceRoot = resolveCodeAgentsTerminalCwd({});
   const workspaceConfig = loadMcpConfig(workspaceRoot);
