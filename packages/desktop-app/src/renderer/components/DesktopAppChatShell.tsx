@@ -45,6 +45,7 @@ import {
   DESKTOP_LOCAL_AGENT_ENGINE_BY_ID,
   DESKTOP_LOCAL_AGENT_OPTIONS,
   createDesktopLocalAgentRuntime,
+  pickDefaultDesktopLocalAgent,
   type DesktopLocalAgentId,
 } from "../lib/desktop-local-agent-runtime.js";
 import type { DesktopTerminalAgentId } from "../lib/desktop-terminal-preferences.js";
@@ -177,6 +178,9 @@ export default function DesktopAppChatShell({
   >([]);
   const [localAgentModelsLoading, setLocalAgentModelsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState("default");
+  // True once the person has picked a runtime for this app; until then the
+  // chat opens on the first signed-in subscription runtime.
+  const agentChosenRef = useRef(false);
   const [localCodeChangePrompt, setLocalCodeChangePrompt] = useState("");
   const [localCodeChange, setLocalCodeChange] = useState<LocalCodeChangeState>({
     status: "idle",
@@ -220,7 +224,10 @@ export default function DesktopAppChatShell({
   useEffect(() => {
     try {
       const stored = localStorage.getItem(`desktop-app-agent:${appId}`);
-      if (stored) setSelectedAgent(stored);
+      if (stored) {
+        agentChosenRef.current = true;
+        setSelectedAgent(stored);
+      }
       // coercion-ok: localStorage is optional renderer state; the explicit default remains active.
     } catch {
       // Keep the default agent when storage is unavailable.
@@ -302,6 +309,7 @@ export default function DesktopAppChatShell({
     (agent: string) => {
       const option = availableAgents.find((item) => item.id === agent);
       if (!option || option.configured === false) return;
+      agentChosenRef.current = true;
       setSelectedAgent(agent);
       try {
         localStorage.setItem(`desktop-app-agent:${appId}`, agent);
@@ -312,6 +320,18 @@ export default function DesktopAppChatShell({
     },
     [appId, availableAgents],
   );
+
+  const defaultLocalAgent = useMemo(
+    () => pickDefaultDesktopLocalAgent(availableAgents),
+    [availableAgents],
+  );
+  useEffect(() => {
+    if (localAgentModelsLoading || agentChosenRef.current) return;
+    if (!defaultLocalAgent) return;
+    setSelectedAgent((current) =>
+      current === "default" ? defaultLocalAgent : current,
+    );
+  }, [defaultLocalAgent, localAgentModelsLoading]);
 
   const handleLocalRuntimeSetup = useCallback((agent: string) => {
     if (agent === "codex") {
@@ -325,11 +345,43 @@ export default function DesktopAppChatShell({
     selectedAgent === "default"
       ? undefined
       : (selectedAgent as DesktopLocalAgentId);
+  const engineModelsKey = useMemo(() => {
+    if (!localAgentId) return "";
+    const engine = DESKTOP_LOCAL_AGENT_ENGINE_BY_ID[localAgentId];
+    return JSON.stringify(
+      localAgentModels
+        .filter((item) => item.engine === engine)
+        .map((item) => item.model),
+    );
+  }, [localAgentId, localAgentModels]);
   const localRuntime = useMemo(
     () =>
-      localAgentId ? createDesktopLocalAgentRuntime(localAgentId) : undefined,
-    [localAgentId],
+      localAgentId
+        ? createDesktopLocalAgentRuntime(localAgentId, undefined, {
+            appId,
+            appName,
+            ...(engineModelsKey
+              ? { engineModels: JSON.parse(engineModelsKey) as string[] }
+              : {}),
+          })
+        : undefined,
+    [appId, appName, engineModelsKey, localAgentId],
   );
+
+  // The rail's Chat button toggles this panel: leave one state-only log line
+  // in main.log so the opening can be verified without a screenshot.
+  useEffect(() => {
+    if (!toggleScopeId) return;
+    const onToggle = (event: Event) => {
+      const detail = (event as CustomEvent<{ scopeId?: unknown }>).detail;
+      if (detail?.scopeId !== toggleScopeId) return;
+      void window.electronAPI?.codeAgents
+        ?.noteAppChatOpened?.({ appId, runtime: selectedAgent })
+        ?.catch(() => undefined);
+    };
+    window.addEventListener("agent-panel:toggle", onToggle);
+    return () => window.removeEventListener("agent-panel:toggle", onToggle);
+  }, [appId, selectedAgent, toggleScopeId]);
   const openDesktopSettings = useCallback(
     (section?: string) =>
       onOpenSettings?.(desktopSettingsTabForSection(section)),
@@ -630,6 +682,7 @@ export default function DesktopAppChatShell({
               dynamicSuggestions={false}
               suggestions={[]}
               emptyStateText={`Ask about ${appName}`}
+              showMissingApiKeySetup={!defaultLocalAgent}
               availableAgents={availableAgents}
               selectedAgent={selectedAgent}
               onAgentChange={handleAgentChange}

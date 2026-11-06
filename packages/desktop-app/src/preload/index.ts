@@ -532,6 +532,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC.CODE_AGENTS_OPEN_TERMINAL, request),
     openCodexLogin: (): Promise<CodeAgentTerminalResult> =>
       ipcRenderer.invoke(IPC.CODE_AGENTS_OPEN_CODEX_LOGIN),
+    noteAppChatOpened: (request: {
+      appId: string;
+      runtime: string;
+    }): Promise<void> =>
+      ipcRenderer.invoke(IPC.CODE_AGENTS_NOTE_APP_CHAT_OPENED, request),
     getRemoteConnectorStatus: (): Promise<CodeAgentRemoteConnectorStatus> =>
       ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_CONNECTOR_GET_STATUS),
     setRemoteConnectorEnabled: (

@@ -571,6 +571,31 @@ export function registerCodeAgentsIpc(deps: CodeAgentsIpcDeps): void {
       await openCodeAgentCodexLogin(),
   );
 
+  // Proof line for the app rail's Chat button: state only, no prompts or accounts.
+  ipcMain.handle(
+    IPC.CODE_AGENTS_NOTE_APP_CHAT_OPENED,
+    (_event: IpcMainInvokeEvent, request?: unknown): void => {
+      const payload =
+        typeof request === "object" && request !== null
+          ? (request as { appId?: unknown; runtime?: unknown })
+          : {};
+      const appId =
+        typeof payload.appId === "string" &&
+        /^[A-Za-z0-9_-]{1,80}$/.test(payload.appId)
+          ? payload.appId
+          : "unknown";
+      const runtime =
+        typeof payload.runtime === "string" &&
+        /^[A-Za-z0-9_-]{1,40}$/.test(payload.runtime)
+          ? payload.runtime
+          : "unknown";
+      console.info("[code-agents] app chat toggled the desktop agent panel", {
+        appId,
+        runtime,
+      });
+    },
+  );
+
   ipcMain.handle(
     IPC.CODE_AGENTS_REMOTE_CONNECTOR_GET_STATUS,
     (): CodeAgentRemoteConnectorStatus => getRemoteConnectorStatus(),

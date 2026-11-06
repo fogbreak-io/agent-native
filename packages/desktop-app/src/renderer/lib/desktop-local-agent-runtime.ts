@@ -51,6 +51,49 @@ export type DesktopLocalAgentPermissionMode =
 
 export const DEFAULT_DESKTOP_LOCAL_AGENT_PERMISSION_MODE = "read-only" as const;
 
+/** The app whose chat panel the local agent is serving. */
+export interface DesktopLocalAgentAppContext {
+  appId: string;
+  appName: string;
+  /**
+   * Models this runtime's engine offers. The model button lists every engine,
+   * so a model from another engine is dropped and the engine's own default runs.
+   */
+  engineModels?: readonly string[];
+}
+
+/** Subscription-backed runtimes, in the order a fresh app chat prefers them. */
+const DESKTOP_LOCAL_AGENT_DEFAULT_ORDER = ["claude-code", "codex"] as const;
+
+/**
+ * Picks the runtime a fresh app chat opens with: the first signed-in
+ * subscription runtime (Claude Code, then Codex). Returns undefined when
+ * neither is signed in, so the hosted default stays in place.
+ */
+export function pickDefaultDesktopLocalAgent(
+  agents: ReadonlyArray<{ id: string; configured?: boolean }>,
+): DesktopLocalAgentId | undefined {
+  for (const id of DESKTOP_LOCAL_AGENT_DEFAULT_ORDER) {
+    if (agents.some((agent) => agent.id === id && agent.configured === true)) {
+      return id;
+    }
+  }
+  return undefined;
+}
+
+function modelForEngine(
+  model: string | undefined,
+  context?: DesktopLocalAgentAppContext,
+): string | undefined {
+  if (!model || !context?.engineModels) return model;
+  return context.engineModels.includes(model) ? model : undefined;
+}
+
+function appContextPrefix(context: DesktopLocalAgentAppContext): string {
+  const serverId = `desktop_app_${context.appId.replace(/[^A-Za-z0-9_]/g, "_")}`;
+  return `You are answering from the ${context.appName} panel inside Fogbreak. Act on ${context.appName} through its connected tools (MCP server "${serverId}") before anything else.\n\n`;
+}
+
 export const DESKTOP_LOCAL_AGENT_ENGINE_BY_ID: Record<
   DesktopLocalAgentId,
   string
@@ -329,6 +372,7 @@ function createSessionView(
   runtime: AgentChatRuntime,
   onDispose: () => void,
   defaultPermissionMode: DesktopLocalAgentPermissionMode,
+  appContext?: DesktopLocalAgentAppContext,
 ): AgentChatRuntimeSession {
   const cancelActiveTurn = async (
     reason = "cancelled",
@@ -446,7 +490,7 @@ function createSessionView(
           runId,
           prompt,
           followUpMode: "immediate",
-          model: input.model,
+          model: modelForEngine(input.model, appContext),
           effort: input.reasoningEffort,
           metadata: {
             source: "desktop-chat",
@@ -468,18 +512,19 @@ function createSessionView(
           ? input.metadata.permissionMode
           : defaultPermissionMode;
         const created = await window.electronAPI.codeAgents.createRun({
-          prompt,
+          prompt: appContext ? `${appContextPrefix(appContext)}${prompt}` : prompt,
           engine:
             DESKTOP_LOCAL_AGENT_ENGINE_BY_ID[
               runtime.id.replace("desktop-local-", "") as DesktopLocalAgentId
             ],
-          model: input.model,
+          model: modelForEngine(input.model, appContext),
           effort: input.reasoningEffort,
           permissionMode,
           metadata: {
             source: "desktop-chat",
             runtimeId: runtime.id,
             threadId: state.threadId,
+            ...(appContext ? { appId: appContext.appId } : {}),
           },
         });
         if (!created.ok || !created.run) {
@@ -596,6 +641,7 @@ function createSessionView(
 export function createDesktopLocalAgentRuntime(
   agentId: DesktopLocalAgentId,
   permissionMode: DesktopLocalAgentPermissionMode = DEFAULT_DESKTOP_LOCAL_AGENT_PERMISSION_MODE,
+  appContext?: DesktopLocalAgentAppContext,
 ): AgentChatRuntime {
   const runtimeId = `desktop-local-${agentId}`;
   const sessions = new Map<string, SessionState>();
@@ -631,6 +677,7 @@ export function createDesktopLocalAgentRuntime(
           if (sessions.get(id) === state) sessions.delete(id);
         },
         permissionMode,
+        appContext,
       );
     },
   };

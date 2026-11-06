@@ -12277,6 +12277,33 @@ function pushCodeAgentModelOptions(
   }
 }
 
+type LocalRuntimeLogState = "signed-in" | "sign-in" | "not-installed";
+
+function localRuntimeLogState(status: {
+  available: boolean;
+  authenticated: boolean;
+}): LocalRuntimeLogState {
+  if (!status.available) return "not-installed";
+  return status.authenticated ? "signed-in" : "sign-in";
+}
+
+let lastLoggedLocalRuntimes = "";
+
+// State-only proof line for the app chat model button: no emails or tokens.
+function logLocalCodeAgentRuntimes(
+  claude: { available: boolean; authenticated: boolean },
+  codex: { available: boolean; authenticated: boolean },
+): void {
+  const state = {
+    "claude-cli": localRuntimeLogState(claude),
+    "codex-cli": localRuntimeLogState(codex),
+  };
+  const key = JSON.stringify(state);
+  if (key === lastLoggedLocalRuntimes) return;
+  lastLoggedLocalRuntimes = key;
+  console.info("[code-agents] local runtimes", state);
+}
+
 async function getCodeAgentModelList(
   input?: unknown,
 ): Promise<CodeAgentModelListResult> {
@@ -12292,6 +12319,7 @@ async function getCodeAgentModelList(
       providerStatusById(settings, "builder")?.configured,
     );
     const claude = getLocalClaudeCliStatus(cliStatusOptions);
+    logLocalCodeAgentRuntimes(claude, codex);
     const pi = getLocalCliAvailability(
       "pi",
       "Pi",

@@ -5,7 +5,10 @@ import type {
 import type { CodeAgentTranscriptEvent } from "@shared/ipc-channels";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDesktopLocalAgentRuntime } from "./desktop-local-agent-runtime.js";
+import {
+  createDesktopLocalAgentRuntime,
+  pickDefaultDesktopLocalAgent,
+} from "./desktop-local-agent-runtime.js";
 
 type TranscriptListener = Parameters<
   ElectronAPI["codeAgents"]["subscribeTranscript"]
@@ -267,5 +270,104 @@ describe("Desktop local AgentKit runtime lifecycle", () => {
     await expect(
       session.startTurn({ prompt: "Use a disposed session." }),
     ).rejects.toThrow("session has been disposed");
+  });
+
+  it("binds a run to the app panel that started it", async () => {
+    const api = createDesktopAgentApi();
+    const session = await createDesktopLocalAgentRuntime(
+      "claude-code",
+      undefined,
+      { appId: "song-studio", appName: "Song Studio" },
+    ).createSession({ id: "thread-app-context" });
+
+    const turn = await session.startTurn({ prompt: "List my songs." });
+
+    expect(api.codeAgents.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        engine: "claude-cli",
+        prompt: expect.stringContaining("desktop_app_song_studio"),
+        metadata: expect.objectContaining({ appId: "song-studio" }),
+      }),
+    );
+    expect(api.codeAgents.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining("List my songs."),
+      }),
+    );
+    await turn.cancel?.({ reason: "test" });
+  });
+
+  it("drops a model that belongs to another engine", async () => {
+    const api = createDesktopAgentApi();
+    const session = await createDesktopLocalAgentRuntime(
+      "claude-code",
+      undefined,
+      {
+        appId: "song-studio",
+        appName: "Song Studio",
+        engineModels: ["claude-sonnet-5-5"],
+      },
+    ).createSession({ id: "thread-cross-engine" });
+
+    const turn = await session.startTurn({
+      prompt: "Hello.",
+      model: "gpt-5.5-codex",
+    });
+
+    expect(api.codeAgents.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({ engine: "claude-cli", model: undefined }),
+    );
+    await turn.cancel?.({ reason: "test" });
+  });
+
+  it("keeps a model that belongs to the engine", async () => {
+    const api = createDesktopAgentApi();
+    const session = await createDesktopLocalAgentRuntime(
+      "claude-code",
+      undefined,
+      {
+        appId: "song-studio",
+        appName: "Song Studio",
+        engineModels: ["claude-sonnet-5-5"],
+      },
+    ).createSession({ id: "thread-same-engine" });
+
+    const turn = await session.startTurn({
+      prompt: "Hello.",
+      model: "claude-sonnet-5-5",
+    });
+
+    expect(api.codeAgents.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-sonnet-5-5" }),
+    );
+    await turn.cancel?.({ reason: "test" });
+  });
+});
+
+describe("pickDefaultDesktopLocalAgent", () => {
+  it("prefers a signed-in Claude Code, then Codex", () => {
+    expect(
+      pickDefaultDesktopLocalAgent([
+        { id: "default", configured: true },
+        { id: "codex", configured: true },
+        { id: "claude-code", configured: true },
+      ]),
+    ).toBe("claude-code");
+    expect(
+      pickDefaultDesktopLocalAgent([
+        { id: "codex", configured: true },
+        { id: "claude-code", configured: false },
+      ]),
+    ).toBe("codex");
+  });
+
+  it("keeps the hosted default when no subscription runtime is signed in", () => {
+    expect(
+      pickDefaultDesktopLocalAgent([
+        { id: "default", configured: true },
+        { id: "codex", configured: false },
+        { id: "pi", configured: true },
+      ]),
+    ).toBeUndefined();
   });
 });
