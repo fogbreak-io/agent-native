@@ -10,7 +10,7 @@ SKILL fogbreak:runtime-aware-agent-work READ whole; fogbreak:fogbreak-build READ
 | id | state |
 |---|---|
 | 15,53,83,93,94,95,97,107 Cloudflare | IN PROGRESS (route diagnosis above) |
-| 20,22,25,26,108 Control Room live in Chrome | OPEN |
+| 20,22,25,26,108 Control Room live in Chrome | IN PROGRESS: new private artifact https://claude.ai/artifact/4sDbgNxAHmRM2AEX4QJaXj built (source /home/user/agent-native/docs/orch8/control-room/control-room.html, commit f8a22161); reviewer a91d422f84f9d0bd8 running. UNPROVEN: live connector never run in a real viewer; owner view untested |
 | 46 Claude panel/orchestrator inside Fogbreak.app | OPEN |
 
 ## Findings 2026-11-06 ~07:10Z
@@ -21,3 +21,15 @@ SKILL fogbreak:runtime-aware-agent-work READ whole; fogbreak:fogbreak-build READ
 ## Lanes launched (Sonnet 5.5, dev cloud, parent = this session)
 - aa511f22252c93318 build-lane: ask 46 Claude engine/panel audit+fix in packages/desktop-app (no push, returns sha)
 - ad718850cc5ea03a2 build-lane: live Control Room artifact (asks 20,22,25,26,108), new artifact + docs/orch8/control-room
+
+## Control Room lane result (ad718850cc5ea03a2) 2026-11-06 ~07:15Z
+FAILED/UNPROVEN
+- Live feed (mcp list_sessions/list_events polled every 30s) run only against a Playwright mock of window.claude fed with real rows; not run in a real claude.ai viewer. Owner view untested.
+- Plain Chrome: artifact is private, needs claude.ai login in that Chrome; whether live feed runs on a top-level artifact page is unverified. Nothing made public.
+- Real iframe per session NOT allowed by the artifact page contract (no third-party embeds). Panel shows session record + last events + an 'Open session' link instead. This differs from ask 22 as worded; reported, not hidden.
+- Old artifact CLF8akvcxQWkJANBdHF4du and D2 spec not available in cloud; nothing taken from them.
+- Seed snapshot has 12 of the account's sessions (has_more true); live feed asks for 30.
+PROVEN (Playwright chromium, mock runtime)
+- Rows show source updated_at + age; bar shows 'Data as of'; >15 min rows marked STALE; feed failure shows red banner; no clean-empty state. 4 fresh / 8 stale of 12 matched the real data read at 07:02Z (e.g. session_018NcMAh58R3B7schW4wqbs3 updated_at 07:01:11).
+- Horizontal strip across the top; screenshots (desktop/light/phone/snapshot/failure/no-runtime) in the scratchpad, no overflow, no console errors.
+Next owner for the real-viewer check: orchestrator #8 via Mac computer-control (not Kean).
