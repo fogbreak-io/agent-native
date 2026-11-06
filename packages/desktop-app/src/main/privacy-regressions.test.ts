@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { claudeCliModelOptions } from "./claude-subscription.js";
+
 function source(relativePath: string): string {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
@@ -339,7 +341,14 @@ describe("desktop passive-access regressions", () => {
     );
     expect(modelList).toContain("configured: codex.authenticated");
     expect(modelList).toContain('statusLabel: "ChatGPT subscription"');
-    expect(modelList).toContain('statusLabel: "Claude subscription"');
+    expect(modelList).toContain("claudeCliModelOptions({");
+    expect(
+      claudeCliModelOptions({
+        engine: "claude-cli",
+        supportedModels: ["claude-sonnet-5-5"],
+        probe: { available: true, authenticated: true },
+      })[0]?.statusLabel,
+    ).toBe("Claude subscription");
     expect(modelList).not.toContain('engine: "auto"');
   });
 
