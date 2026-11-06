@@ -10,8 +10,8 @@ SKILL fogbreak:runtime-aware-agent-work READ whole; fogbreak:fogbreak-build READ
 | id | state |
 |---|---|
 | 15,53,83,93,94,95,97,107 Cloudflare | IN PROGRESS (route diagnosis above) |
-| 20,22,25,26,108 Control Room live in Chrome | IN PROGRESS: new private artifact https://claude.ai/artifact/4sDbgNxAHmRM2AEX4QJaXj built (source /home/user/agent-native/docs/orch8/control-room/control-room.html, commit f8a22161); reviewer a91d422f84f9d0bd8 running. UNPROVEN: live connector never run in a real viewer; owner view untested |
-| 46 Claude panel/orchestrator inside Fogbreak.app | OPEN |
+| 20,22,25,26,108 Control Room live in Chrome | IN PROGRESS: new private artifact https://claude.ai/artifact/4sDbgNxAHmRM2AEX4QJaXj built (source /home/user/agent-native/docs/orch8/control-room/control-room.html, commit f8a22161); reviewer a91d422f84f9d0bd8 returned REQUEST CHANGES at f8a22161 (clock-skew shown fresh, UI rebuilt every 10s, Live badge not age-driven, absent vs unreadable snapshot); fixes at 3c443452 (file sha256 57b35382...1163, artifact v2); fresh reviewer ae051f7e6615a95a4 running. UNPROVEN: live connector never run in a real viewer; owner view untested |
+| 46 Claude panel/orchestrator inside Fogbreak.app | IN PROGRESS: Claude sign-in/panel fix on branch claude/orch8-desktop-claude-panel @ b859863c (base 1910aa68, 10 files, packages/desktop-app only); reviewer a6c1914ba41cfb221 running; no PR yet. Orchestrator panel itself NOT built (no evidence it exists). CLI-only, owner view untested |
 
 ## Findings 2026-11-06 ~07:10Z
 - PR #284 is not in fogbreak-io/agent-native (GET pulls/284 = 404; open PR list empty). It belongs to Song's repo/branch; CF preview of it cannot be deployed from this checkout.
@@ -33,3 +33,12 @@ PROVEN (Playwright chromium, mock runtime)
 - Rows show source updated_at + age; bar shows 'Data as of'; >15 min rows marked STALE; feed failure shows red banner; no clean-empty state. 4 fresh / 8 stale of 12 matched the real data read at 07:02Z (e.g. session_018NcMAh58R3B7schW4wqbs3 updated_at 07:01:11).
 - Horizontal strip across the top; screenshots (desktop/light/phone/snapshot/failure/no-runtime) in the scratchpad, no overflow, no console errors.
 Next owner for the real-viewer check: orchestrator #8 via Mac computer-control (not Kean).
+
+## Claude panel lane result (aa511f22252c93318) 2026-11-06 ~07:40Z
+UNPROVEN (all CLI-only, owner view untested): real signed-out claude CLI not run (sandbox token is host-managed; proven with a fake claude printing loggedIn:false exit 1 through the real spawn path); Sign in button / Terminal launch / focus refresh never run on a real Mac; panel tested with a mocked toolkit AgentSidebar.
+Still open: rail Chat does nothing while the app itself needs sign-in; Codex has no typed state in the panel; authMethod oauth_token (setup-token) would show 'API key only' (intended? unverified); QuickPromptOverlay.tsx:389 Codex-only login path untouched.
+PROVEN: fake signed-out CLI -> needs-sign-in; no CLI -> unavailable w/ message; desktop-app typecheck clean; pnpm test 79 files / 714 tests pass incl. new DesktopAppChatShell.runtime-notice.spec.tsx (8; mutating beginProviderLogin arg to codex fails it); privacy-regressions + CodeAgentsHub specs 70 pass; guards (i18n-catalogs, i18n-changed-copy, no-silent-coercion, no-source-reading-tests, no-default-chrome, no-raw-colors, no-new-escape-hatches, strict-lint, compiler-strictness, no-oracle-loosening) pass with base 1910aa68.
+Squashed WIP checkpoints into one clean commit b859863c on claude/orch8-desktop-claude-panel (pushed).
+
+## Cloudflare: next owner
+Orchestrator #8 (Mac Desktop profile has the working Cloudflare MCP): read account via MCP and deploy Song's PR #284 preview from there. Not buildable from this cloud checkout (PR #284 is not in this repo).
