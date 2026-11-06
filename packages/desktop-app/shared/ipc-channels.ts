@@ -529,6 +529,17 @@ export interface CodeAgentModelSelection {
   effort?: CodeAgentReasoningEffort | (string & {});
 }
 
+/**
+ * Why a local runtime's CLI can or cannot run, as probed by Electron main.
+ * A runtime whose CLI is missing has no model options at all, so there is no
+ * "not-installed" value here.
+ */
+export type CodeAgentRuntimeState =
+  | "signed-in"
+  | "needs-sign-in"
+  | "not-subscription"
+  | "unreadable";
+
 export interface CodeAgentModelOption {
   engine: string;
   engineLabel: string;
@@ -538,6 +549,7 @@ export interface CodeAgentModelOption {
   configured?: boolean;
   statusLabel?: string;
   isSubscription?: boolean;
+  runtimeState?: CodeAgentRuntimeState;
 }
 
 export interface CodeAgentModelListResult {
