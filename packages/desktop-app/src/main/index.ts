@@ -204,9 +204,9 @@ import {
   parseAdditionalChromeExtensionIds,
 } from "./browser-control/native-host";
 import {
+  cachedLocalClaudeCliStatus,
   claudeCliModelOptions,
-  readLocalClaudeCliStatus,
-  readLocalClaudeCliStatusAsync,
+  readLocalClaudeCliStatusFresh,
   type LocalClaudeCliStatus,
 } from "./claude-subscription.js";
 import {
@@ -12043,19 +12043,15 @@ function readConfiguredCodexModel(): string | undefined {
 
 const localClaudeCliStatusCache = createCliStatusCache<LocalClaudeCliStatus>();
 
-function getLocalClaudeCliStatus(
-  options?: CliStatusReadOptions,
-): LocalClaudeCliStatus {
-  return cachedCliStatus(
+const localClaudeCliRunners = {
+  sync: (args: readonly string[]) => runCliSync("claude", [...args]),
+  async: (args: readonly string[]) => runCliAsync("claude", [...args]),
+};
+
+function getLocalClaudeCliStatus(): LocalClaudeCliStatus {
+  return cachedLocalClaudeCliStatus(
     localClaudeCliStatusCache,
-    () => readLocalClaudeCliStatus((args) => runCliSync("claude", [...args])),
-    () =>
-      readLocalClaudeCliStatusAsync((args) =>
-        runCliAsync("claude", [...args]),
-      ),
-    Date.now,
-    CLI_STATUS_TTL_MS,
-    options,
+    localClaudeCliRunners,
   );
 }
 
@@ -12272,7 +12268,11 @@ async function getCodeAgentModelList(
     const builderConfigured = Boolean(
       providerStatusById(settings, "builder")?.configured,
     );
-    const claude = getLocalClaudeCliStatus(cliStatusOptions);
+    const claude = await readLocalClaudeCliStatusFresh(
+      localClaudeCliStatusCache,
+      localClaudeCliRunners,
+      cliStatusOptions,
+    );
     logLocalCodeAgentRuntimes(claude, codex);
     const pi = getLocalCliAvailability(
       "pi",

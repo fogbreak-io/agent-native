@@ -416,6 +416,7 @@ describe("Claude Code state in plain words", () => {
       message:
         "Claude Code is installed but not signed in. This panel is using Codex.",
       canSignIn: true,
+      canRetry: false,
     });
   });
 
@@ -457,6 +458,7 @@ describe("Claude Code state in plain words", () => {
       message:
         "Fogbreak couldn't check which local agents are installed or signed in.",
       canSignIn: false,
+      canRetry: true,
     });
   });
 });
