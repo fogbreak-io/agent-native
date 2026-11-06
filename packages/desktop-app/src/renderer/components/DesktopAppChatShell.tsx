@@ -44,6 +44,7 @@ import {
 import {
   DESKTOP_LOCAL_AGENT_ENGINE_BY_ID,
   DESKTOP_LOCAL_AGENT_OPTIONS,
+  CLAUDE_CODE_NOT_INSTALLED_MESSAGE,
   createDesktopLocalAgentRuntime,
   describeClaudeCodeProblem,
   desktopLocalRuntimeNotice,
@@ -366,7 +367,7 @@ export default function DesktopAppChatShell({
   );
 
   const startClaudeSignIn = useCallback(async () => {
-    const api = window.electronAPI?.multiFrontier;
+    const api = window.electronAPI.multiFrontier;
     if (!api) {
       setClaudeSignIn({
         status: "failed",
@@ -393,26 +394,28 @@ export default function DesktopAppChatShell({
     }
   }, []);
 
+  const openLocalRuntimeSetup = useCallback((agent: string) => {
+    if (agent === "codex") {
+      void window.electronAPI?.codeAgents?.openCodexLogin();
+      return;
+    }
+    void window.electronAPI?.codeAgents?.openTerminal();
+  }, []);
+
   const handleLocalRuntimeSetup = useCallback(
     (agent: string) => {
-      if (agent === "codex") {
-        void window.electronAPI?.codeAgents?.openCodexLogin();
-        return;
-      }
-      if (agent === "claude-code") {
-        if (!claudeInstalled) {
-          setClaudeSignIn({
-            status: "failed",
-            message: describeClaudeCodeProblem("not-installed") ?? "",
-          });
-          return;
-        }
+      if (agent !== "claude-code") {
+        openLocalRuntimeSetup(agent);
+      } else if (claudeInstalled) {
         void startClaudeSignIn();
-        return;
+      } else {
+        setClaudeSignIn({
+          status: "failed",
+          message: CLAUDE_CODE_NOT_INSTALLED_MESSAGE,
+        });
       }
-      void window.electronAPI?.codeAgents?.openTerminal();
     },
-    [claudeInstalled, startClaudeSignIn],
+    [claudeInstalled, openLocalRuntimeSetup, startClaudeSignIn],
   );
 
   // The sign-in finishes in Terminal, outside this window: look again when the
@@ -420,9 +423,8 @@ export default function DesktopAppChatShell({
   useEffect(() => {
     if (claudeSignIn.status !== "opened") return;
     const lookAgain = () => {
-      const listModels = window.electronAPI?.codeAgents?.listModels;
-      if (!listModels) return;
-      void listModels({ refresh: true })
+      void window.electronAPI.codeAgents
+        .listModels({ refresh: true })
         .then((result) => {
           setLocalAgentModels(result.models);
           setLocalAgentModelsFailed(result.status !== "ok");
@@ -801,7 +803,9 @@ export default function DesktopAppChatShell({
               emptyStateFooter={
                 runtimeNotice || claudeSignIn.status !== "idle" ? (
                   <DesktopRuntimeNotice
-                    message={runtimeNotice?.message}
+                    {...(runtimeNotice
+                      ? { message: runtimeNotice.message }
+                      : {})}
                     canSignIn={
                       claudeInstalled &&
                       !claudeConfigured &&

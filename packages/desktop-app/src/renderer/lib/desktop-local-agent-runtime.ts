@@ -97,10 +97,15 @@ export function desktopLocalRuntimeStatusLabel(
       return "Couldn't check";
     case "not-subscription":
       return "API key only";
-    default:
+    case "needs-sign-in":
       return "Sign in";
+    case "signed-in":
+      return "Signed in";
   }
 }
+
+export const CLAUDE_CODE_NOT_INSTALLED_MESSAGE =
+  "Claude Code isn't installed on this computer.";
 
 /** Plain-words reason Claude Code cannot run; undefined when it can. */
 export function describeClaudeCodeProblem(
@@ -116,7 +121,7 @@ export function describeClaudeCodeProblem(
     case "unreadable":
       return "Fogbreak couldn't tell whether Claude Code is signed in.";
     case "not-installed":
-      return "Claude Code isn't installed on this computer.";
+      return CLAUDE_CODE_NOT_INSTALLED_MESSAGE;
   }
 }
 

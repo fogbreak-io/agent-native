@@ -397,7 +397,11 @@ describe("Claude Code state in plain words", () => {
   const claude = (
     runtimeState?: "needs-sign-in" | "unreadable",
     configured = false,
-  ) => ({ id: "claude-code", configured, runtimeState });
+  ) => ({
+    id: "claude-code",
+    configured,
+    ...(runtimeState ? { runtimeState } : {}),
+  });
 
   it("names the reason and the runtime the panel is using instead", () => {
     expect(

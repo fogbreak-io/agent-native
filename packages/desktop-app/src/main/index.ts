@@ -12122,7 +12122,9 @@ function parseLocalClaudeCliStatus(
         exitCode: statusResult.status,
         stdout: statusResult.stdout,
         stderr: statusResult.stderr,
-        spawnErrorCode: statusResult.error?.code,
+        ...(statusResult.error?.code
+          ? { spawnErrorCode: statusResult.error.code }
+          : {}),
       }).connectionState;
   return {
     available: true,
