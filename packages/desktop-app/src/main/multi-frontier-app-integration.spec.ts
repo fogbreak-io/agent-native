@@ -291,6 +291,7 @@ function claudeStatus(): SubscriptionStatus {
     providerId: "claude",
     connectionState: "connected",
     authMethod: "claude.ai",
+    plan: { type: "max" },
     telemetry: {
       state: "unavailable",
       source: "connection-only",

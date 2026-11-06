@@ -89,6 +89,7 @@ type CodeAgentModelOption = {
   configured?: boolean;
   statusLabel?: string;
   isSubscription?: boolean;
+  runtimeState?: import("../../shared/ipc-channels.js").CodeAgentRuntimeState;
 };
 
 type CodeAgentModelListResult = {

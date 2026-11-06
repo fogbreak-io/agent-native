@@ -4,6 +4,7 @@ export type SubscriptionProviderId = (typeof SUBSCRIPTION_PROVIDER_IDS)[number];
 export const SUBSCRIPTION_CONNECTION_STATES = [
   "connected",
   "needs-sign-in",
+  "no-subscription",
   "unavailable",
   "error",
 ] as const;
@@ -42,6 +43,13 @@ export const SUBSCRIPTION_TELEMETRY_SOURCES = [
 ] as const;
 export type SubscriptionTelemetrySource =
   (typeof SUBSCRIPTION_TELEMETRY_SOURCES)[number];
+
+/** Whether a Claude `authMethod` names a claude.ai login (not an API key or console login). */
+export function isClaudeSubscriptionAuthMethod(
+  authMethod: string | undefined,
+): boolean {
+  return authMethod?.toLowerCase().replaceAll(/[^a-z]/g, "") === "claudeai";
+}
 
 export interface SubscriptionPlan {
   type?: string;

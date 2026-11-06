@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDesktopLocalAgentRuntime,
+  describeClaudeCodeProblem,
+  desktopLocalRuntimeNotice,
+  desktopLocalRuntimeStatusLabel,
   pickDefaultDesktopLocalAgent,
 } from "./desktop-local-agent-runtime.js";
 
@@ -369,5 +372,91 @@ describe("pickDefaultDesktopLocalAgent", () => {
         { id: "pi", configured: true },
       ]),
     ).toBeUndefined();
+  });
+});
+
+describe("Claude Code state in plain words", () => {
+  it("keeps signed out, API-key only, unreadable and not installed apart", () => {
+    expect(describeClaudeCodeProblem("signed-in")).toBeUndefined();
+    const messages = [
+      describeClaudeCodeProblem("needs-sign-in"),
+      describeClaudeCodeProblem("not-subscription"),
+      describeClaudeCodeProblem("no-plan"),
+      describeClaudeCodeProblem("unreadable"),
+      describeClaudeCodeProblem("not-installed"),
+    ];
+    expect(new Set(messages).size).toBe(5);
+    const labels = [
+      desktopLocalRuntimeStatusLabel("needs-sign-in"),
+      desktopLocalRuntimeStatusLabel("not-subscription"),
+      desktopLocalRuntimeStatusLabel("no-plan"),
+      desktopLocalRuntimeStatusLabel("unreadable"),
+      desktopLocalRuntimeStatusLabel("not-installed"),
+    ];
+    expect(new Set(labels).size).toBe(5);
+  });
+
+  const claude = (
+    runtimeState?: "needs-sign-in" | "unreadable",
+    configured = false,
+  ) => ({
+    id: "claude-code",
+    configured,
+    ...(runtimeState ? { runtimeState } : {}),
+  });
+
+  it("names the reason and the runtime the panel is using instead", () => {
+    expect(
+      desktopLocalRuntimeNotice({
+        agents: [claude("needs-sign-in"), { id: "codex", configured: true }],
+        selectedAgent: "codex",
+        modelListFailed: false,
+      }),
+    ).toEqual({
+      message:
+        "Claude Code is installed but not signed in. This panel is using Codex.",
+      canSignIn: true,
+    });
+  });
+
+  it("warns that a remembered Claude choice will fail while signed out", () => {
+    expect(
+      desktopLocalRuntimeNotice({
+        agents: [claude("needs-sign-in")],
+        selectedAgent: "claude-code",
+        modelListFailed: false,
+      })?.message,
+    ).toContain("Messages to Claude will fail until you sign in.");
+  });
+
+  it("says nothing when Claude can run or its CLI is missing", () => {
+    expect(
+      desktopLocalRuntimeNotice({
+        agents: [claude(undefined, true)],
+        selectedAgent: "claude-code",
+        modelListFailed: false,
+      }),
+    ).toBeUndefined();
+    expect(
+      desktopLocalRuntimeNotice({
+        agents: [claude(undefined)],
+        selectedAgent: "default",
+        modelListFailed: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("reports a failed probe loudly with no sign-in button", () => {
+    expect(
+      desktopLocalRuntimeNotice({
+        agents: [],
+        selectedAgent: "default",
+        modelListFailed: true,
+      }),
+    ).toEqual({
+      message:
+        "Fogbreak couldn't check which local agents are installed or signed in.",
+      canSignIn: false,
+    });
   });
 });

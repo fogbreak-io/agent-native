@@ -54,6 +54,7 @@ import {
   type CodeAgentHostMetadata,
   type CodeAgentModelListResult,
   type CodeAgentModelOption,
+  type CodeAgentRuntimeState,
   type CodeAgentProjectFolder,
   type CodeAgentProjectListResult,
   type CodeAgentProjectSelectResult,
@@ -202,7 +203,12 @@ import {
   installBrowserNativeHost,
   parseAdditionalChromeExtensionIds,
 } from "./browser-control/native-host";
-import { isClaudeSubscriptionAuthMethod } from "./claude-subscription.js";
+import {
+  claudeCliModelOptions,
+  readLocalClaudeCliStatus,
+  readLocalClaudeCliStatusAsync,
+  type LocalClaudeCliStatus,
+} from "./claude-subscription.js";
 import {
   CLI_STATUS_TTL_MS,
   cachedCliStatus,
@@ -12034,14 +12040,6 @@ function readConfiguredCodexModel(): string | undefined {
   return undefined;
 }
 
-interface LocalClaudeCliStatus {
-  available: boolean;
-  authenticated: boolean;
-  label: string;
-  version?: string;
-  error?: string;
-}
-
 const localClaudeCliStatusCache = createCliStatusCache<LocalClaudeCliStatus>();
 
 function getLocalClaudeCliStatus(
@@ -12049,70 +12047,15 @@ function getLocalClaudeCliStatus(
 ): LocalClaudeCliStatus {
   return cachedCliStatus(
     localClaudeCliStatusCache,
-    () => {
-      const version = runCliSync("claude", ["--version"]);
-      if (version.error) return parseLocalClaudeCliStatus(version, null);
-      return parseLocalClaudeCliStatus(
-        version,
-        runCliSync("claude", ["auth", "status", "--json"]),
-      );
-    },
-    async () => {
-      const version = await runCliAsync("claude", ["--version"]);
-      if (version.error) return parseLocalClaudeCliStatus(version, null);
-      return parseLocalClaudeCliStatus(
-        version,
-        await runCliAsync("claude", ["auth", "status", "--json"]),
-      );
-    },
+    () => readLocalClaudeCliStatus((args) => runCliSync("claude", [...args])),
+    () =>
+      readLocalClaudeCliStatusAsync((args) =>
+        runCliAsync("claude", [...args]),
+      ),
     Date.now,
     CLI_STATUS_TTL_MS,
     options,
   );
-}
-
-function parseLocalClaudeCliStatus(
-  versionResult: CliRun,
-  statusResult: CliRun | null,
-): LocalClaudeCliStatus {
-  if (versionResult.error || !statusResult) {
-    return {
-      available: false,
-      authenticated: false,
-      label: "Claude Code",
-      error:
-        versionResult.error?.code === "ENOENT"
-          ? "Claude Code CLI was not found."
-          : versionResult.error?.message,
-    };
-  }
-
-  let status: Record<string, unknown> | null = null;
-  try {
-    const parsed = JSON.parse(statusResult.stdout ?? "") as unknown;
-    status = isObject(parsed) ? parsed : null;
-  } catch {
-    status = null;
-  }
-  const authenticated = Boolean(
-    statusResult.status === 0 &&
-    status?.loggedIn === true &&
-    isClaudeSubscriptionAuthMethod(
-      typeof status?.authMethod === "string" ? status.authMethod : undefined,
-    ) &&
-    status?.apiProvider === "firstParty" &&
-    typeof status?.subscriptionType === "string" &&
-    status.subscriptionType.trim(),
-  );
-  return {
-    available: true,
-    authenticated,
-    label: "Claude subscription",
-    version: (versionResult.stdout ?? versionResult.stderr ?? "").trim(),
-    error: authenticated
-      ? undefined
-      : "Claude Code is not signed in with a Claude subscription.",
-  };
 }
 
 interface LocalCliAvailability {
@@ -12277,21 +12220,31 @@ function pushCodeAgentModelOptions(
   }
 }
 
-type LocalRuntimeLogState = "signed-in" | "sign-in" | "not-installed";
+type LocalRuntimeLogState =
+  | "signed-in"
+  | "sign-in"
+  | "unreadable"
+  | "not-installed";
 
 function localRuntimeLogState(status: {
   available: boolean;
   authenticated: boolean;
+  runtimeState?: CodeAgentRuntimeState;
 }): LocalRuntimeLogState {
   if (!status.available) return "not-installed";
-  return status.authenticated ? "signed-in" : "sign-in";
+  if (status.authenticated) return "signed-in";
+  return status.runtimeState === "unreadable" ? "unreadable" : "sign-in";
 }
 
 let lastLoggedLocalRuntimes = "";
 
 // State-only proof line for the app chat model button: no emails or tokens.
 function logLocalCodeAgentRuntimes(
-  claude: { available: boolean; authenticated: boolean },
+  claude: {
+    available: boolean;
+    authenticated: boolean;
+    runtimeState?: CodeAgentRuntimeState;
+  },
   codex: { available: boolean; authenticated: boolean },
 ): void {
   const state = {
@@ -12390,18 +12343,13 @@ async function getCodeAgentModelList(
         });
       }
     }
-    if (claude.available) {
-      pushCodeAgentModelOptions(models, {
+    models.push(
+      ...claudeCliModelOptions({
         engine: CLAUDE_CLI_ENGINE_NAME,
-        engineLabel: "Anthropic",
         supportedModels: ANTHROPIC_MODEL_CONFIG.supportedModels,
-        description: "Run locally through your signed-in Claude subscription.",
-        configured: claude.authenticated,
-        ...(claude.authenticated
-          ? { statusLabel: "Claude subscription", isSubscription: true }
-          : {}),
-      });
-    }
+        probe: claude,
+      }),
+    );
     if (pi.available) {
       models.push({
         engine: PI_CLI_ENGINE_NAME,

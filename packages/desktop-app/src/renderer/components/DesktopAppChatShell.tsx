@@ -44,13 +44,20 @@ import {
 import {
   DESKTOP_LOCAL_AGENT_ENGINE_BY_ID,
   DESKTOP_LOCAL_AGENT_OPTIONS,
+  CLAUDE_CODE_NOT_INSTALLED_MESSAGE,
   createDesktopLocalAgentRuntime,
+  describeClaudeCodeProblem,
+  desktopLocalRuntimeNotice,
+  desktopLocalRuntimeStatusLabel,
   pickDefaultDesktopLocalAgent,
   type DesktopLocalAgentId,
 } from "../lib/desktop-local-agent-runtime.js";
 import type { DesktopTerminalAgentId } from "../lib/desktop-terminal-preferences.js";
 import type { RendererTheme } from "../lib/theme.js";
 import type { AppWebviewAuthState } from "./AppWebview.js";
+import DesktopRuntimeNotice, {
+  type ClaudeSignInState,
+} from "./DesktopRuntimeNotice.js";
 import DesktopTerminalTabs from "./DesktopTerminalTabs.js";
 
 type DesktopChatModelGroup = {
@@ -146,6 +153,14 @@ export function shouldShowDesktopAppChatSidebar(input: {
   return input.desktopIdentityStatus !== "sign-in-required";
 }
 
+function hasSignedInClaude(models: readonly CodeAgentModelOption[]): boolean {
+  return models.some(
+    (model) =>
+      model.engine === DESKTOP_LOCAL_AGENT_ENGINE_BY_ID["claude-code"] &&
+      model.configured === true,
+  );
+}
+
 type LocalCodeChangeState =
   | { status: "idle" }
   | { status: "starting"; message?: string }
@@ -177,6 +192,12 @@ export default function DesktopAppChatShell({
     CodeAgentModelOption[]
   >([]);
   const [localAgentModelsLoading, setLocalAgentModelsLoading] = useState(true);
+  // A failed probe is not an empty list: every row would otherwise read
+  // "Not installed".
+  const [localAgentModelsFailed, setLocalAgentModelsFailed] = useState(false);
+  const [claudeSignIn, setClaudeSignIn] = useState<ClaudeSignInState>({
+    status: "idle",
+  });
   const [selectedAgent, setSelectedAgent] = useState("default");
   // True once the person has picked a runtime for this app; until then the
   // chat opens on the first signed-in subscription runtime.
@@ -246,10 +267,14 @@ export default function DesktopAppChatShell({
     }
     void listModels()
       .then((result) => {
-        if (!cancelled) setLocalAgentModels(result.models);
+        if (cancelled) return;
+        setLocalAgentModels(result.models);
+        setLocalAgentModelsFailed(result.status !== "ok");
       })
       .catch(() => {
-        if (!cancelled) setLocalAgentModels([]);
+        if (cancelled) return;
+        setLocalAgentModels([]);
+        setLocalAgentModelsFailed(true);
       })
       .finally(() => {
         if (!cancelled) setLocalAgentModelsLoading(false);
@@ -295,14 +320,26 @@ export default function DesktopAppChatShell({
         const engine =
           DESKTOP_LOCAL_AGENT_ENGINE_BY_ID[agent.id as DesktopLocalAgentId];
         const model = localAgentModels.find((item) => item.engine === engine);
+        const configured = model?.configured === true;
+        const runtimeState = model?.runtimeState;
+        const problem =
+          agent.id === "claude-code" && !configured && !localAgentModelsFailed
+            ? describeClaudeCodeProblem(runtimeState ?? "not-installed")
+            : undefined;
         return {
           ...agent,
-          configured: model?.configured === true,
-          statusLabel:
-            model?.statusLabel ?? (model ? "Sign in" : "Not installed"),
+          configured,
+          ...(problem ? { description: problem } : {}),
+          ...(runtimeState ? { runtimeState } : {}),
+          statusLabel: localAgentModelsFailed
+            ? "Couldn't check"
+            : (model?.statusLabel ??
+              desktopLocalRuntimeStatusLabel(
+                model ? (runtimeState ?? "needs-sign-in") : "not-installed",
+              )),
         };
       }),
-    [localAgentModels],
+    [localAgentModels, localAgentModelsFailed],
   );
 
   const handleAgentChange = useCallback(
@@ -333,13 +370,130 @@ export default function DesktopAppChatShell({
     );
   }, [defaultLocalAgent, localAgentModelsLoading]);
 
-  const handleLocalRuntimeSetup = useCallback((agent: string) => {
+  const claudeAgent = availableAgents.find(
+    (agent) => agent.id === "claude-code",
+  );
+  const claudeConfigured = claudeAgent?.configured === true;
+  const claudeInstalled = localAgentModels.some(
+    (model) => model.engine === DESKTOP_LOCAL_AGENT_ENGINE_BY_ID["claude-code"],
+  );
+
+  const startClaudeSignIn = useCallback(async () => {
+    const api = window.electronAPI.multiFrontier;
+    if (!api) {
+      setClaudeSignIn({
+        status: "failed",
+        message: "Claude sign-in is unavailable in this Desktop build.",
+      });
+      return;
+    }
+    setClaudeSignIn({ status: "opening" });
+    try {
+      const result = await api.beginProviderLogin("claude");
+      setClaudeSignIn(
+        result.error?.message
+          ? { status: "failed", message: result.error.message }
+          : { status: "opened" },
+      );
+    } catch (error) {
+      setClaudeSignIn({
+        status: "failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not open the Claude sign-in.",
+      });
+    }
+  }, []);
+
+  const openLocalRuntimeSetup = useCallback((agent: string) => {
     if (agent === "codex") {
       void window.electronAPI?.codeAgents?.openCodexLogin();
       return;
     }
     void window.electronAPI?.codeAgents?.openTerminal();
   }, []);
+
+  const handleLocalRuntimeSetup = useCallback(
+    (agent: string) => {
+      if (agent !== "claude-code") {
+        openLocalRuntimeSetup(agent);
+      } else if (claudeInstalled) {
+        void startClaudeSignIn();
+      } else {
+        setClaudeSignIn({
+          status: "failed",
+          message: CLAUDE_CODE_NOT_INSTALLED_MESSAGE,
+        });
+      }
+    },
+    [claudeInstalled, openLocalRuntimeSetup, startClaudeSignIn],
+  );
+
+  // The sign-in finishes in Terminal, outside this window: look again when the
+  // person comes back, past the main-process status cache. One look at a time.
+  const recheckingRef = useRef(false);
+  const [rechecking, setRechecking] = useState(false);
+  const recheckLocalAgents = useCallback(async () => {
+    if (recheckingRef.current) return;
+    recheckingRef.current = true;
+    setRechecking(true);
+    try {
+      const result = await window.electronAPI.codeAgents.listModels({
+        refresh: true,
+      });
+      setLocalAgentModels(result.models);
+      setLocalAgentModelsFailed(result.status !== "ok");
+      if (result.status !== "ok") {
+        setClaudeSignIn({ status: "recheck-failed" });
+      } else if (!hasSignedInClaude(result.models)) {
+        // Still signed out: drop "Finish signing in…" and offer the button again.
+        setClaudeSignIn({ status: "idle" });
+      }
+    } catch {
+      setLocalAgentModelsFailed(true);
+      setClaudeSignIn({ status: "recheck-failed" });
+    } finally {
+      recheckingRef.current = false;
+      setRechecking(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (
+      claudeSignIn.status !== "opened" &&
+      claudeSignIn.status !== "recheck-failed"
+    ) {
+      return;
+    }
+    const lookAgain = () => void recheckLocalAgents();
+    window.addEventListener("focus", lookAgain);
+    return () => window.removeEventListener("focus", lookAgain);
+  }, [claudeSignIn.status, recheckLocalAgents]);
+
+  // The person asked to sign in to Claude: once it can run, use it unless they
+  // have picked a runtime themselves.
+  useEffect(() => {
+    if (claudeSignIn.status === "idle" || !claudeConfigured) return;
+    setClaudeSignIn({ status: "idle" });
+    if (!agentChosenRef.current) setSelectedAgent("claude-code");
+  }, [claudeConfigured, claudeSignIn.status]);
+
+  const runtimeNotice = useMemo(
+    () =>
+      localAgentModelsLoading
+        ? undefined
+        : desktopLocalRuntimeNotice({
+            agents: availableAgents,
+            selectedAgent,
+            modelListFailed: localAgentModelsFailed,
+          }),
+    [
+      availableAgents,
+      localAgentModelsFailed,
+      localAgentModelsLoading,
+      selectedAgent,
+    ],
+  );
 
   const localAgentId =
     selectedAgent === "default"
@@ -682,6 +836,25 @@ export default function DesktopAppChatShell({
               dynamicSuggestions={false}
               suggestions={[]}
               emptyStateText={`Ask about ${appName}`}
+              composerSlot={
+                runtimeNotice || claudeSignIn.status !== "idle" ? (
+                  <DesktopRuntimeNotice
+                    {...(runtimeNotice
+                      ? { message: runtimeNotice.message }
+                      : {})}
+                    canSignIn={
+                      claudeInstalled &&
+                      !claudeConfigured &&
+                      (runtimeNotice?.canSignIn ?? true)
+                    }
+                    signIn={claudeSignIn}
+                    onSignIn={() => void startClaudeSignIn()}
+                    onRetry={() => void recheckLocalAgents()}
+                    canRetry={localAgentModelsFailed}
+                    retryBusy={rechecking}
+                  />
+                ) : undefined
+              }
               showMissingApiKeySetup={!defaultLocalAgent}
               availableAgents={availableAgents}
               selectedAgent={selectedAgent}

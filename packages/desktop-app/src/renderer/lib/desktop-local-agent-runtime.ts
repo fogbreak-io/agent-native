@@ -7,7 +7,10 @@ import type {
   AgentChatRuntimeTurn,
   AgentChatRuntimeTurnInput,
 } from "@agent-native/core/client/agent-chat";
-import type { CodeAgentTranscriptEvent } from "@shared/ipc-channels";
+import type {
+  CodeAgentRuntimeState,
+  CodeAgentTranscriptEvent,
+} from "@shared/ipc-channels";
 
 export const DESKTOP_LOCAL_AGENT_OPTIONS = [
   {
@@ -79,6 +82,93 @@ export function pickDefaultDesktopLocalAgent(
     }
   }
   return undefined;
+}
+
+/** A runtime whose CLI is missing has no model options, so it has no probe state. */
+export type DesktopLocalRuntimeState = CodeAgentRuntimeState | "not-installed";
+
+export function desktopLocalRuntimeStatusLabel(
+  state: DesktopLocalRuntimeState,
+): string {
+  switch (state) {
+    case "not-installed":
+      return "Not installed";
+    case "unreadable":
+      return "Couldn't check";
+    case "not-subscription":
+      return "API key only";
+    case "no-plan":
+      return "No plan";
+    case "needs-sign-in":
+      return "Sign in";
+    case "signed-in":
+      return "Signed in";
+  }
+}
+
+export const CLAUDE_CODE_NOT_INSTALLED_MESSAGE =
+  "Claude Code isn't installed on this computer.";
+
+/** Plain-words reason Claude Code cannot run; undefined when it can. */
+export function describeClaudeCodeProblem(
+  state: DesktopLocalRuntimeState,
+): string | undefined {
+  switch (state) {
+    case "signed-in":
+      return undefined;
+    case "needs-sign-in":
+      return "Claude Code is installed but not signed in.";
+    case "not-subscription":
+      return "Claude Code is signed in with an API key, not a Claude subscription.";
+    case "no-plan":
+      return "Claude is signed in, but not with a Claude subscription plan Fogbreak can use.";
+    case "unreadable":
+      return "Fogbreak couldn't tell whether Claude Code is signed in.";
+    case "not-installed":
+      return CLAUDE_CODE_NOT_INSTALLED_MESSAGE;
+  }
+}
+
+export interface DesktopLocalRuntimeNotice {
+  message: string;
+  /** Whether the sign-in button can help with this problem. */
+  canSignIn: boolean;
+}
+
+/**
+ * What the app chat panel says about Claude Code when it cannot run: the
+ * reason, and which runtime the panel is using instead. A missing CLI is not
+ * announced here (most people never installed it); its picker row says so.
+ */
+export function desktopLocalRuntimeNotice(input: {
+  agents: ReadonlyArray<{
+    id: string;
+    configured?: boolean;
+    runtimeState?: CodeAgentRuntimeState;
+  }>;
+  selectedAgent: string;
+  modelListFailed: boolean;
+}): DesktopLocalRuntimeNotice | undefined {
+  if (input.modelListFailed) {
+    return {
+      message:
+        "Fogbreak couldn't check which local agents are installed or signed in.",
+      canSignIn: false,
+    };
+  }
+  const claude = input.agents.find((agent) => agent.id === "claude-code");
+  if (!claude || claude.configured === true || !claude.runtimeState) {
+    return undefined;
+  }
+  const problem = describeClaudeCodeProblem(claude.runtimeState);
+  if (!problem) return undefined;
+  const using =
+    input.selectedAgent === "codex"
+      ? " This panel is using Codex."
+      : input.selectedAgent === "claude-code"
+        ? " Messages to Claude will fail until you sign in."
+        : "";
+  return { message: `${problem}${using}`, canSignIn: true };
 }
 
 function modelForEngine(
