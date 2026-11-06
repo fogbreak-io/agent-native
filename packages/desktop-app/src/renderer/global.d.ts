@@ -1087,10 +1087,7 @@ interface ElectronAPI {
       request?: CodeAgentTerminalRequest,
     ): Promise<CodeAgentTerminalResult>;
     openCodexLogin(): Promise<CodeAgentTerminalResult>;
-    noteAppChatOpened(request: {
-      appId: string;
-      runtime: string;
-    }): Promise<void>;
+    noteAppChatOpened(request: { appId: string; runtime: string }): Promise<void>;
     getRemoteConnectorStatus(): Promise<CodeAgentRemoteConnectorStatus>;
     setRemoteConnectorEnabled(
       enabled: boolean,

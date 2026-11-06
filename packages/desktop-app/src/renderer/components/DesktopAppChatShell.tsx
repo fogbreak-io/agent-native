@@ -153,9 +153,6 @@ export function shouldShowDesktopAppChatSidebar(input: {
   return input.desktopIdentityStatus !== "sign-in-required";
 }
 
-const RECHECK_FAILED_MESSAGE =
-  "Fogbreak couldn't re-check the Claude sign-in. Switch back here to try again.";
-
 function hasSignedInClaude(models: readonly CodeAgentModelOption[]): boolean {
   return models.some(
     (model) =>
@@ -446,20 +443,25 @@ export default function DesktopAppChatShell({
       setLocalAgentModels(result.models);
       setLocalAgentModelsFailed(result.status !== "ok");
       if (result.status !== "ok") {
-        setClaudeSignIn({ status: "failed", message: RECHECK_FAILED_MESSAGE });
+        setClaudeSignIn({ status: "recheck-failed" });
       } else if (!hasSignedInClaude(result.models)) {
         // Still signed out: drop "Finish signing in…" and offer the button again.
         setClaudeSignIn({ status: "idle" });
       }
     } catch {
       setLocalAgentModelsFailed(true);
-      setClaudeSignIn({ status: "failed", message: RECHECK_FAILED_MESSAGE });
+      setClaudeSignIn({ status: "recheck-failed" });
     } finally {
       recheckingRef.current = false;
     }
   }, []);
   useEffect(() => {
-    if (claudeSignIn.status !== "opened") return;
+    if (
+      claudeSignIn.status !== "opened" &&
+      claudeSignIn.status !== "recheck-failed"
+    ) {
+      return;
+    }
     const lookAgain = () => void recheckLocalAgents();
     window.addEventListener("focus", lookAgain);
     return () => window.removeEventListener("focus", lookAgain);
@@ -844,6 +846,7 @@ export default function DesktopAppChatShell({
                     }
                     signIn={claudeSignIn}
                     onSignIn={() => void startClaudeSignIn()}
+                    onRetry={() => void recheckLocalAgents()}
                   />
                 ) : undefined
               }

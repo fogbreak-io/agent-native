@@ -4,6 +4,7 @@ export type ClaudeSignInState =
   | { status: "idle" }
   | { status: "opening" }
   | { status: "opened" }
+  | { status: "recheck-failed" }
   | { status: "failed"; message: string };
 
 export interface DesktopRuntimeNoticeProps {
@@ -12,6 +13,7 @@ export interface DesktopRuntimeNoticeProps {
   canSignIn: boolean;
   signIn: ClaudeSignInState;
   onSignIn: () => void;
+  onRetry: () => void;
 }
 
 /** Plain-words Claude Code state with one sign-in button, shown above the composer so it stays visible once the thread has messages. */
@@ -20,6 +22,7 @@ export default function DesktopRuntimeNotice({
   canSignIn,
   signIn,
   onSignIn,
+  onRetry,
 }: DesktopRuntimeNoticeProps) {
   const text =
     signIn.status === "failed"
@@ -28,7 +31,9 @@ export default function DesktopRuntimeNotice({
         ? "Opening Terminal for Claude sign-in…"
         : signIn.status === "opened"
           ? "Finish signing in to Claude in Terminal. This panel updates when you come back."
-          : message;
+          : signIn.status === "recheck-failed"
+            ? "Fogbreak couldn't re-check the Claude sign-in. Try again, or switch back here and it will look again."
+            : message;
   if (!text) return null;
   return (
     <div
@@ -36,15 +41,17 @@ export default function DesktopRuntimeNotice({
       className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
     >
       <p className="min-w-0 flex-1">{text}</p>
-      {canSignIn ? (
+      {canSignIn || signIn.status === "recheck-failed" ? (
         <Button
           size="sm"
           variant="outline"
           className="shrink-0"
           disabled={signIn.status === "opening"}
-          onClick={onSignIn}
+          onClick={signIn.status === "recheck-failed" ? onRetry : onSignIn}
         >
-          Sign in to Claude
+          {signIn.status === "recheck-failed"
+            ? "Try again"
+            : "Sign in to Claude"}
         </Button>
       ) : null}
     </div>

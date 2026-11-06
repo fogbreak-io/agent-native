@@ -381,17 +381,19 @@ describe("Claude Code state in plain words", () => {
     const messages = [
       describeClaudeCodeProblem("needs-sign-in"),
       describeClaudeCodeProblem("not-subscription"),
+      describeClaudeCodeProblem("no-plan"),
       describeClaudeCodeProblem("unreadable"),
       describeClaudeCodeProblem("not-installed"),
     ];
-    expect(new Set(messages).size).toBe(4);
+    expect(new Set(messages).size).toBe(5);
     const labels = [
       desktopLocalRuntimeStatusLabel("needs-sign-in"),
       desktopLocalRuntimeStatusLabel("not-subscription"),
+      desktopLocalRuntimeStatusLabel("no-plan"),
       desktopLocalRuntimeStatusLabel("unreadable"),
       desktopLocalRuntimeStatusLabel("not-installed"),
     ];
-    expect(new Set(labels).size).toBe(4);
+    expect(new Set(labels).size).toBe(5);
   });
 
   const claude = (
