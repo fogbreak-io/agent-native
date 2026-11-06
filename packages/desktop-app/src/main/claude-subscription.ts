@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
 import type {
+  CodeAgentModelOption,
+  CodeAgentRuntimeState,
+} from "../../shared/ipc-channels.js";
+import type {
   SubscriptionStatus,
   SubscriptionTelemetry,
 } from "../../shared/subscription-status.js";
@@ -128,7 +132,12 @@ export function interpretClaudeAuthStatus(
     result.exitCode === 0 || result.exitCode === 1
       ? parseAuthStatus(result.stdout)
       : null;
-  if (!raw || typeof raw.loggedIn !== "boolean") {
+  // Signed in always exits 0, so exit 1 with loggedIn:true contradicts itself.
+  if (
+    !raw ||
+    typeof raw.loggedIn !== "boolean" ||
+    (raw.loggedIn && result.exitCode !== 0)
+  ) {
     return connectionOnlyStatus(
       "error",
       "Claude Code answered, but its sign-in state could not be read.",
@@ -162,6 +171,93 @@ export function interpretClaudeAuthStatus(
       ? claudeLiveUsageUnsupportedTelemetry(Boolean(planType))
       : connectionOnlyTelemetry(false),
   };
+}
+
+/** One `--version` or `auth status` run of the local CLI, as Electron main probes it. */
+export interface ClaudeCliProbeRun {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: { code?: string | undefined; message: string } | undefined;
+}
+
+export interface LocalClaudeCliProbe {
+  available: boolean;
+  authenticated: boolean;
+  /** Why an installed CLI cannot run; absent when the CLI is not installed. */
+  runtimeState?: CodeAgentRuntimeState;
+  error?: string;
+}
+
+/**
+ * Classifies the local `claude` CLI for the app chat model list from its
+ * `--version` and `auth status --json` runs. The sign-in answer comes from
+ * `interpretClaudeAuthStatus`, so this and the Settings subscription row
+ * cannot disagree about what counts as signed in.
+ */
+export function classifyLocalClaudeCli(
+  version: ClaudeCliProbeRun,
+  status: ClaudeCliProbeRun | null,
+): LocalClaudeCliProbe {
+  if (version.error?.code === "ENOENT") {
+    return {
+      available: false,
+      authenticated: false,
+      error: "Claude Code CLI was not found.",
+    };
+  }
+  if (version.error || !status) {
+    return {
+      available: true,
+      authenticated: false,
+      runtimeState: "unreadable",
+      error: version.error?.message ?? "Claude Code could not be run.",
+    };
+  }
+  const connection = interpretClaudeAuthStatus({
+    exitCode: status.status,
+    stdout: status.stdout,
+    stderr: status.stderr,
+    ...(status.error?.code ? { spawnErrorCode: status.error.code } : {}),
+  });
+  if (isClaudeSubscriptionStatus(connection)) {
+    return { available: true, authenticated: true, runtimeState: "signed-in" };
+  }
+  const runtimeState: CodeAgentRuntimeState =
+    connection.connectionState === "needs-sign-in"
+      ? "needs-sign-in"
+      : connection.connectionState === "connected"
+        ? "not-subscription"
+        : "unreadable";
+  return {
+    available: true,
+    authenticated: false,
+    runtimeState,
+    error: "Claude Code is not signed in with a Claude subscription.",
+  };
+}
+
+/** The model-list rows for the local Claude CLI; an uninstalled CLI has none. */
+export function claudeCliModelOptions(input: {
+  engine: string;
+  supportedModels: readonly string[];
+  probe: LocalClaudeCliProbe;
+}): CodeAgentModelOption[] {
+  if (!input.probe.available) return [];
+  return input.supportedModels.map((model) => ({
+    engine: input.engine,
+    engineLabel: "Anthropic",
+    model,
+    label: model,
+    description: "Run locally through your signed-in Claude subscription.",
+    configured: input.probe.authenticated,
+    ...(input.probe.authenticated
+      ? { statusLabel: "Claude subscription", isSubscription: true }
+      : {}),
+    ...(input.probe.runtimeState
+      ? { runtimeState: input.probe.runtimeState }
+      : {}),
+  }));
 }
 
 export function isClaudeSubscriptionStatus(

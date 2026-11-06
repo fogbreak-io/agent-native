@@ -190,6 +190,11 @@ import {
   FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
+import {
+  mintSongStudioMcpEntry,
+  signInSongStudioLocally,
+} from "./song-studio-local-session.js";
+import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -199,8 +204,8 @@ import {
   parseAdditionalChromeExtensionIds,
 } from "./browser-control/native-host";
 import {
-  interpretClaudeAuthStatus,
-  isClaudeSubscriptionAuthMethod,
+  claudeCliModelOptions,
+  classifyLocalClaudeCli,
 } from "./claude-subscription.js";
 import {
   CLI_STATUS_TTL_MS,
@@ -349,13 +354,8 @@ import {
   installSentryWebContentsInstrumentation,
   setSentryWebContentsMetadata,
 } from "./sentry";
-import {
-  mintSongStudioMcpEntry,
-  signInSongStudioLocally,
-} from "./song-studio-local-session.js";
 import { setMailWebviewBackgroundThrottling } from "./webview-background-throttling.js";
 import { installWebviewNavigationListeners } from "./webview-navigation";
-import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import { installWindowDragController } from "./window-drag";
 import { loadDesktopWorkspaceApps } from "./workspace-apps.js";
 
@@ -12081,66 +12081,13 @@ function parseLocalClaudeCliStatus(
   versionResult: CliRun,
   statusResult: CliRun | null,
 ): LocalClaudeCliStatus {
-  if (versionResult.error?.code === "ENOENT") {
-    return {
-      available: false,
-      authenticated: false,
-      label: "Claude Code",
-      error: "Claude Code CLI was not found.",
-    };
-  }
-  if (versionResult.error || !statusResult) {
-    return {
-      available: true,
-      authenticated: false,
-      runtimeState: "unreadable",
-      label: "Claude Code",
-      error: versionResult.error?.message ?? "Claude Code could not be run.",
-    };
-  }
-
-  let status: Record<string, unknown> | null = null;
-  try {
-    const parsed = JSON.parse(statusResult.stdout ?? "") as unknown;
-    status = isObject(parsed) ? parsed : null;
-  } catch {
-    status = null;
-  }
-  const authenticated = Boolean(
-    statusResult.status === 0 &&
-    status?.loggedIn === true &&
-    isClaudeSubscriptionAuthMethod(
-      typeof status?.authMethod === "string" ? status.authMethod : undefined,
-    ) &&
-    status?.apiProvider === "firstParty" &&
-    typeof status?.subscriptionType === "string" &&
-    status.subscriptionType.trim(),
-  );
-  const connectionState = authenticated
-    ? "connected"
-    : interpretClaudeAuthStatus({
-        exitCode: statusResult.status,
-        stdout: statusResult.stdout,
-        stderr: statusResult.stderr,
-        ...(statusResult.error?.code
-          ? { spawnErrorCode: statusResult.error.code }
-          : {}),
-      }).connectionState;
+  const probe = classifyLocalClaudeCli(versionResult, statusResult);
   return {
-    available: true,
-    authenticated,
-    runtimeState: authenticated
-      ? "signed-in"
-      : connectionState === "needs-sign-in"
-        ? "needs-sign-in"
-        : connectionState === "connected"
-          ? "not-subscription"
-          : "unreadable",
-    label: "Claude subscription",
-    version: (versionResult.stdout ?? versionResult.stderr ?? "").trim(),
-    error: authenticated
-      ? undefined
-      : "Claude Code is not signed in with a Claude subscription.",
+    ...probe,
+    label: probe.available ? "Claude subscription" : "Claude Code",
+    ...(probe.available && versionResult.error === undefined
+      ? { version: (versionResult.stdout || versionResult.stderr).trim() }
+      : {}),
   };
 }
 
@@ -12290,7 +12237,6 @@ function pushCodeAgentModelOptions(
     description?: string;
     statusLabel?: string;
     isSubscription?: boolean;
-    runtimeState?: CodeAgentRuntimeState;
   },
 ): void {
   for (const model of options.supportedModels) {
@@ -12303,7 +12249,6 @@ function pushCodeAgentModelOptions(
       configured: options.configured,
       ...(options.statusLabel ? { statusLabel: options.statusLabel } : {}),
       ...(options.isSubscription ? { isSubscription: true } : {}),
-      ...(options.runtimeState ? { runtimeState: options.runtimeState } : {}),
     });
   }
 }
@@ -12431,19 +12376,13 @@ async function getCodeAgentModelList(
         });
       }
     }
-    if (claude.available) {
-      pushCodeAgentModelOptions(models, {
+    models.push(
+      ...claudeCliModelOptions({
         engine: CLAUDE_CLI_ENGINE_NAME,
-        engineLabel: "Anthropic",
         supportedModels: ANTHROPIC_MODEL_CONFIG.supportedModels,
-        description: "Run locally through your signed-in Claude subscription.",
-        configured: claude.authenticated,
-        runtimeState: claude.runtimeState,
-        ...(claude.authenticated
-          ? { statusLabel: "Claude subscription", isSubscription: true }
-          : {}),
-      });
-    }
+        probe: claude,
+      }),
+    );
     if (pi.available) {
       models.push({
         engine: PI_CLI_ENGINE_NAME,
@@ -13204,16 +13143,13 @@ registerAppsIpc({
       .get({ url: dispatchOrigin })
       .then((cookies) =>
         cookies.length === 0
-          ? ({
-              enabled: false,
-              apps: [],
-            } satisfies DesktopWorkspaceAppListResult)
+          ? ({ enabled: false, apps: [] } satisfies DesktopWorkspaceAppListResult)
           : loadDesktopWorkspaceApps({ identitySession, dispatchOrigin }),
       )
       .then((result) => {
-        cacheDesktopWorkspaceApps(result, generation);
-        return result;
-      });
+      cacheDesktopWorkspaceApps(result, generation);
+      return result;
+    });
   },
 });
 
