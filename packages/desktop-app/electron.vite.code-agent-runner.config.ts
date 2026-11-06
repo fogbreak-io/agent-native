@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite";
 
+import desktopPackage from "./package.json";
+import {
+  BUILD_ENGINE_PACKAGES_ENV,
+  declaredRuntimePackageNames,
+} from "./shared/declared-runtime-packages";
+
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 const runnerOutDir = path.join(configDirectory, "out", "main");
 const smokeEntry =
@@ -57,6 +63,11 @@ function copyRunnerRuntimePackages(): Plugin {
 export default defineConfig({
   ssr: { external: ["ink"], noExternal: true },
   plugins: [copyRunnerRuntimePackages()],
+  define: {
+    [`process.env.${BUILD_ENGINE_PACKAGES_ENV}`]: JSON.stringify(
+      JSON.stringify(declaredRuntimePackageNames(desktopPackage)),
+    ),
+  },
   build: {
     emptyOutDir: false,
     outDir: runnerOutDir,
