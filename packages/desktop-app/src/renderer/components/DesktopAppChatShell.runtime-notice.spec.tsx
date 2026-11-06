@@ -9,6 +9,8 @@ import DesktopAppChatShell from "./DesktopAppChatShell.js";
 type PanelProps = {
   selectedAgent: string;
   availableAgents: unknown[];
+  availableModels?: Array<{ engine: string; models: string[] }>;
+  onAgentChange: (agent: string) => void;
   composerSlot?: React.ReactNode;
   onConnectLocalRuntime: (agent: string) => void;
   children: React.ReactNode;
@@ -22,6 +24,19 @@ vi.mock("@agent-native/toolkit/app/chat", () => ({
     <div>
       <span data-testid="selected">{props.selectedAgent}</span>
       <pre data-testid="agents">{JSON.stringify(props.availableAgents)}</pre>
+      <span data-testid="model-catalog">
+        {props.availableModels === undefined
+          ? "server"
+          : props.availableModels.map((group) => group.engine).join(",")}
+      </span>
+      {["default", "codex", "claude-code"].map((agent) => (
+        <button
+          key={agent}
+          type="button"
+          data-testid={`pick-${agent}`}
+          onClick={() => props.onAgentChange(agent)}
+        />
+      ))}
       <button
         type="button"
         data-testid="pick-claude-row"
@@ -547,5 +562,63 @@ describe("desktop app chat Claude Code state", () => {
       release({ status: "ok", models: claudeModels("needs-sign-in") });
     });
     await settle();
+  });
+
+  it("opens on the signed-in Claude when only a bare default was saved", async () => {
+    localStorage.setItem("desktop-app-agent:orchestrator", "default");
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await mountShell();
+
+    expect(text("selected")).toBe("claude-code");
+  });
+
+  it("keeps the hosted default the person picked, across a reopen", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await mountShell();
+    expect(text("selected")).toBe("claude-code");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-default"]')!
+        .click();
+    });
+    expect(text("selected")).toBe("default");
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await mountShell();
+
+    expect(text("selected")).toBe("default");
+  });
+
+  it("gives the hosted default the server's own model list, not local CLI engines", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [...codexModels, ...claudeModels("signed-in")],
+    });
+    await mountShell();
+    expect(text("selected")).toBe("claude-code");
+    expect(text("model-catalog")).toBe("codex-cli,claude-cli");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-default"]')!
+        .click();
+    });
+    expect(text("selected")).toBe("default");
+    expect(text("model-catalog")).toBe("server");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-claude-code"]')!
+        .click();
+    });
+    expect(text("model-catalog")).toBe("codex-cli,claude-cli");
   });
 });

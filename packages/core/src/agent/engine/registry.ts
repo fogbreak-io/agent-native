@@ -57,7 +57,11 @@ import {
   isLocalNetworkOllamaEndpoint,
   validateProviderBaseUrl,
 } from "./provider-endpoint-validation.js";
-import type { AgentEngine, EngineCapabilities } from "./types.js";
+import {
+  EngineError,
+  type AgentEngine,
+  type EngineCapabilities,
+} from "./types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -292,13 +296,24 @@ export async function resolveEngineAcceptsCustomModels(
   return entry.acceptsCustomModels === true;
 }
 
+export const ENGINE_PACKAGE_NOT_INSTALLED_ERROR_CODE =
+  "engine_package_not_installed";
+
 function assertAgentEnginePackageInstalled(entry: AgentEngineEntry): void {
   if (isAgentEnginePackageInstalled(entry)) return;
-  const installHint = entry.installPackage
-    ? ` Run: pnpm add ${entry.installPackage}`
-    : "";
-  throw new Error(
-    `[agent-engine] Engine "${entry.name}" requires optional packages that are not installed in this app.${installHint}`,
+  if (entry.installPackage) {
+    console.warn(
+      `[agent-engine] Engine "${entry.name}" requires optional packages that are not installed in this app. Run: pnpm add ${entry.installPackage}`,
+    );
+  }
+  // A packaged app cannot add a package, and the person picking the model
+  // cannot either: the message tells them what to do instead.
+  throw new EngineError(
+    `${entry.label} isn't available in this app. Choose a different model.`,
+    {
+      errorCode: ENGINE_PACKAGE_NOT_INSTALLED_ERROR_CODE,
+      providerRetryable: false,
+    },
   );
 }
 
