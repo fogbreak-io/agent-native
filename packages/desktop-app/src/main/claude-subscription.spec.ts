@@ -111,31 +111,100 @@ describe("readClaudeSubscriptionStatus", () => {
     expect(status).not.toHaveProperty("plan");
   });
 
-  it.each([
-    { exitCode: 1, stdout: "", stderr: "not logged in" },
-    { exitCode: 0, stdout: "not json", stderr: "" },
-    { exitCode: null, stdout: "", stderr: "", timedOut: true },
-  ])("does not expose process failures as account data", async (result) => {
-    const execute: ClaudeProcessExecutor = async () => result;
+  it("reads the signed-out answer the real CLI gives, which exits 1 with JSON on stdout", async () => {
+    const execute: ClaudeProcessExecutor = async () => ({
+      exitCode: 1,
+      stdout: JSON.stringify({ loggedIn: false, authMethod: "none" }),
+      stderr: "",
+    });
 
-    await expect(readClaudeSubscriptionStatus({ execute })).resolves.toEqual({
-      schemaVersion: 1,
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
       providerId: "claude",
+      connectionState: "needs-sign-in",
+      authMethod: "none",
+    });
+  });
+
+  it("reports a missing CLI as unavailable, in words", async () => {
+    const execute: ClaudeProcessExecutor = async () => ({
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      spawnErrorCode: "ENOENT",
+    });
+
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
       connectionState: "unavailable",
-      telemetry: {
-        state: "unavailable",
-        source: "connection-only",
-        capabilities: {
-          account: false,
-          plan: false,
-          rateLimits: false,
-          modelTierRateLimits: false,
-          contextWindow: false,
-          credits: false,
-          liveUpdates: false,
-        },
-        meters: [],
+      connectionMessage: "Claude Code was not found on this computer.",
+    });
+  });
+
+  it.each([
+    {
+      name: "timeout",
+      result: { exitCode: null, stdout: "", stderr: "", timedOut: true },
+      message: "Claude Code did not answer when asked whether it is signed in.",
+    },
+    {
+      name: "spawn failure other than a missing CLI",
+      result: {
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+        spawnErrorCode: "EACCES",
       },
+      message: "Fogbreak could not run Claude Code to check its sign-in.",
+    },
+    {
+      name: "exit 1 without JSON",
+      result: { exitCode: 1, stdout: "", stderr: "something broke" },
+      message: "Claude Code answered, but its sign-in state could not be read.",
+    },
+    {
+      name: "exit 0 with text instead of JSON",
+      result: { exitCode: 0, stdout: "not json", stderr: "" },
+      message: "Claude Code answered, but its sign-in state could not be read.",
+    },
+    {
+      name: "unexpected exit code with JSON",
+      result: {
+        exitCode: 2,
+        stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+        stderr: "",
+      },
+      message: "Claude Code answered, but its sign-in state could not be read.",
+    },
+  ])(
+    "reports an unreadable answer ($name) as an error, never as signed out or missing",
+    async ({ result, message }) => {
+      const execute: ClaudeProcessExecutor = async () => result;
+      const status = await readClaudeSubscriptionStatus({ execute });
+
+      expect(status).toMatchObject({
+        schemaVersion: 1,
+        providerId: "claude",
+        connectionState: "error",
+        connectionMessage: message,
+        telemetry: { state: "unavailable", source: "connection-only" },
+      });
+      expect(status).not.toHaveProperty("plan");
+      expect(status).not.toHaveProperty("authMethod");
+    },
+  );
+
+  it("reports a rejected executor as an error", async () => {
+    const execute: ClaudeProcessExecutor = async () => {
+      throw new Error("spawn exploded");
+    };
+
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
+      connectionState: "error",
     });
   });
 
@@ -225,6 +294,33 @@ describe("executeClaudeProcess", () => {
 
       await vi.advanceTimersByTimeAsync(501);
       expect(child.killedSignals).toEqual(["SIGTERM", "SIGKILL"]);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the errno code when the child cannot be started", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = createFakeProcess();
+      const execution = executeClaudeProcess(
+        "claude",
+        ["auth", "status", "--json"],
+        { timeoutMs: 10_000 },
+        () => child,
+      );
+      const result = expect(execution).resolves.toMatchObject({
+        exitCode: null,
+        timedOut: false,
+        spawnErrorCode: "ENOENT",
+      });
+      child.emit(
+        "error",
+        Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }),
+      );
+
+      await vi.advanceTimersByTimeAsync(501);
       await result;
     } finally {
       vi.useRealTimers();

@@ -54,6 +54,7 @@ import {
   type CodeAgentHostMetadata,
   type CodeAgentModelListResult,
   type CodeAgentModelOption,
+  type CodeAgentRuntimeState,
   type CodeAgentProjectFolder,
   type CodeAgentProjectListResult,
   type CodeAgentProjectSelectResult,
@@ -189,11 +190,6 @@ import {
   FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
-import {
-  mintSongStudioMcpEntry,
-  signInSongStudioLocally,
-} from "./song-studio-local-session.js";
-import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -202,7 +198,10 @@ import {
   installBrowserNativeHost,
   parseAdditionalChromeExtensionIds,
 } from "./browser-control/native-host";
-import { isClaudeSubscriptionAuthMethod } from "./claude-subscription.js";
+import {
+  interpretClaudeAuthStatus,
+  isClaudeSubscriptionAuthMethod,
+} from "./claude-subscription.js";
 import {
   CLI_STATUS_TTL_MS,
   cachedCliStatus,
@@ -350,8 +349,13 @@ import {
   installSentryWebContentsInstrumentation,
   setSentryWebContentsMetadata,
 } from "./sentry";
+import {
+  mintSongStudioMcpEntry,
+  signInSongStudioLocally,
+} from "./song-studio-local-session.js";
 import { setMailWebviewBackgroundThrottling } from "./webview-background-throttling.js";
 import { installWebviewNavigationListeners } from "./webview-navigation";
+import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import { installWindowDragController } from "./window-drag";
 import { loadDesktopWorkspaceApps } from "./workspace-apps.js";
 
@@ -12037,6 +12041,8 @@ function readConfiguredCodexModel(): string | undefined {
 interface LocalClaudeCliStatus {
   available: boolean;
   authenticated: boolean;
+  /** Why an installed CLI cannot run; absent when the CLI is not installed. */
+  runtimeState?: CodeAgentRuntimeState;
   label: string;
   version?: string;
   error?: string;
@@ -12075,15 +12081,21 @@ function parseLocalClaudeCliStatus(
   versionResult: CliRun,
   statusResult: CliRun | null,
 ): LocalClaudeCliStatus {
-  if (versionResult.error || !statusResult) {
+  if (versionResult.error?.code === "ENOENT") {
     return {
       available: false,
       authenticated: false,
       label: "Claude Code",
-      error:
-        versionResult.error?.code === "ENOENT"
-          ? "Claude Code CLI was not found."
-          : versionResult.error?.message,
+      error: "Claude Code CLI was not found.",
+    };
+  }
+  if (versionResult.error || !statusResult) {
+    return {
+      available: true,
+      authenticated: false,
+      runtimeState: "unreadable",
+      label: "Claude Code",
+      error: versionResult.error?.message ?? "Claude Code could not be run.",
     };
   }
 
@@ -12104,9 +12116,26 @@ function parseLocalClaudeCliStatus(
     typeof status?.subscriptionType === "string" &&
     status.subscriptionType.trim(),
   );
+  const connectionState = authenticated
+    ? "connected"
+    : interpretClaudeAuthStatus({
+        exitCode: statusResult.status,
+        stdout: statusResult.stdout,
+        stderr: statusResult.stderr,
+        ...(statusResult.error?.code
+          ? { spawnErrorCode: statusResult.error.code }
+          : {}),
+      }).connectionState;
   return {
     available: true,
     authenticated,
+    runtimeState: authenticated
+      ? "signed-in"
+      : connectionState === "needs-sign-in"
+        ? "needs-sign-in"
+        : connectionState === "connected"
+          ? "not-subscription"
+          : "unreadable",
     label: "Claude subscription",
     version: (versionResult.stdout ?? versionResult.stderr ?? "").trim(),
     error: authenticated
@@ -12261,6 +12290,7 @@ function pushCodeAgentModelOptions(
     description?: string;
     statusLabel?: string;
     isSubscription?: boolean;
+    runtimeState?: CodeAgentRuntimeState;
   },
 ): void {
   for (const model of options.supportedModels) {
@@ -12273,25 +12303,36 @@ function pushCodeAgentModelOptions(
       configured: options.configured,
       ...(options.statusLabel ? { statusLabel: options.statusLabel } : {}),
       ...(options.isSubscription ? { isSubscription: true } : {}),
+      ...(options.runtimeState ? { runtimeState: options.runtimeState } : {}),
     });
   }
 }
 
-type LocalRuntimeLogState = "signed-in" | "sign-in" | "not-installed";
+type LocalRuntimeLogState =
+  | "signed-in"
+  | "sign-in"
+  | "unreadable"
+  | "not-installed";
 
 function localRuntimeLogState(status: {
   available: boolean;
   authenticated: boolean;
+  runtimeState?: CodeAgentRuntimeState;
 }): LocalRuntimeLogState {
   if (!status.available) return "not-installed";
-  return status.authenticated ? "signed-in" : "sign-in";
+  if (status.authenticated) return "signed-in";
+  return status.runtimeState === "unreadable" ? "unreadable" : "sign-in";
 }
 
 let lastLoggedLocalRuntimes = "";
 
 // State-only proof line for the app chat model button: no emails or tokens.
 function logLocalCodeAgentRuntimes(
-  claude: { available: boolean; authenticated: boolean },
+  claude: {
+    available: boolean;
+    authenticated: boolean;
+    runtimeState?: CodeAgentRuntimeState;
+  },
   codex: { available: boolean; authenticated: boolean },
 ): void {
   const state = {
@@ -12397,6 +12438,7 @@ async function getCodeAgentModelList(
         supportedModels: ANTHROPIC_MODEL_CONFIG.supportedModels,
         description: "Run locally through your signed-in Claude subscription.",
         configured: claude.authenticated,
+        runtimeState: claude.runtimeState,
         ...(claude.authenticated
           ? { statusLabel: "Claude subscription", isSubscription: true }
           : {}),
@@ -13162,13 +13204,16 @@ registerAppsIpc({
       .get({ url: dispatchOrigin })
       .then((cookies) =>
         cookies.length === 0
-          ? ({ enabled: false, apps: [] } satisfies DesktopWorkspaceAppListResult)
+          ? ({
+              enabled: false,
+              apps: [],
+            } satisfies DesktopWorkspaceAppListResult)
           : loadDesktopWorkspaceApps({ identitySession, dispatchOrigin }),
       )
       .then((result) => {
-      cacheDesktopWorkspaceApps(result, generation);
-      return result;
-    });
+        cacheDesktopWorkspaceApps(result, generation);
+        return result;
+      });
   },
 });
 

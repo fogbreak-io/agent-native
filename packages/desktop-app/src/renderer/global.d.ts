@@ -89,6 +89,7 @@ type CodeAgentModelOption = {
   configured?: boolean;
   statusLabel?: string;
   isSubscription?: boolean;
+  runtimeState?: import("../../shared/ipc-channels.js").CodeAgentRuntimeState;
 };
 
 type CodeAgentModelListResult = {
@@ -1086,7 +1087,10 @@ interface ElectronAPI {
       request?: CodeAgentTerminalRequest,
     ): Promise<CodeAgentTerminalResult>;
     openCodexLogin(): Promise<CodeAgentTerminalResult>;
-    noteAppChatOpened(request: { appId: string; runtime: string }): Promise<void>;
+    noteAppChatOpened(request: {
+      appId: string;
+      runtime: string;
+    }): Promise<void>;
     getRemoteConnectorStatus(): Promise<CodeAgentRemoteConnectorStatus>;
     setRemoteConnectorEnabled(
       enabled: boolean,
