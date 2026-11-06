@@ -47,6 +47,8 @@ import {
   CLAUDE_CODE_NOT_INSTALLED_MESSAGE,
   createDesktopLocalAgentRuntime,
   describeClaudeCodeProblem,
+  desktopAgentFromStorage,
+  desktopAgentStorageValue,
   desktopLocalRuntimeNotice,
   desktopLocalRuntimeStatusLabel,
   pickDefaultDesktopLocalAgent,
@@ -250,10 +252,12 @@ export default function DesktopAppChatShell({
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(`desktop-app-agent:${appId}`);
-      if (stored) {
+      const saved = desktopAgentFromStorage(
+        localStorage.getItem(`desktop-app-agent:${appId}`),
+      );
+      if (saved) {
         agentChosenRef.current = true;
-        setSelectedAgent(stored);
+        setSelectedAgent(saved);
       }
       // coercion-ok: localStorage is optional renderer state; the explicit default remains active.
     } catch {
@@ -355,7 +359,10 @@ export default function DesktopAppChatShell({
       agentChosenRef.current = true;
       setSelectedAgent(agent);
       try {
-        localStorage.setItem(`desktop-app-agent:${appId}`, agent);
+        localStorage.setItem(
+          `desktop-app-agent:${appId}`,
+          desktopAgentStorageValue(agent),
+        );
         // coercion-ok: localStorage is optional renderer state; this mount already has the selection.
       } catch {
         // The selection still applies for this mount when storage is unavailable.
@@ -512,6 +519,16 @@ export default function DesktopAppChatShell({
       selectedAgent,
     ],
   );
+
+  // The hosted default runs on the app's own server, which lists only the
+  // engines it can run. This list holds local CLI engines and engines whose
+  // package the server may not have, and the chat sends the picked engine to
+  // the server as is.
+  const chatModelCatalog = localAgentModelsLoading
+    ? availableModels
+    : selectedAgent === "default" || localAgentModels.length === 0
+      ? undefined
+      : availableModels;
 
   const localAgentId =
     selectedAgent === "default"
@@ -880,11 +897,7 @@ export default function DesktopAppChatShell({
               selectedAgent={selectedAgent}
               onAgentChange={handleAgentChange}
               onConnectLocalRuntime={handleLocalRuntimeSetup}
-              availableModels={
-                localAgentModelsLoading || localAgentModels.length > 0
-                  ? availableModels
-                  : undefined
-              }
+              availableModels={chatModelCatalog}
               modelListLoading={localAgentModelsLoading}
               runtime={localRuntime}
             >

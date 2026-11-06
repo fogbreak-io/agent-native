@@ -95,6 +95,14 @@ function mockOpenAiEndpointCredentials(options: {
   }));
 }
 
+// The run's error event carries errorCode, so a client can tell this failure
+// from any other without reading the text.
+const missingPackageError = {
+  errorCode: "engine_package_not_installed",
+  providerRetryable: false,
+  message: "OpenAI isn't available in this app. Choose a different model.",
+};
+
 describe("AgentEngine registry", () => {
   beforeEach(async () => {
     vi.resetModules();
@@ -229,7 +237,7 @@ describe("AgentEngine registry", () => {
 
     await expect(
       resolveEngine({ engineOption: "ai-sdk:openai" }),
-    ).rejects.toThrow(/requires optional packages/);
+    ).rejects.toMatchObject(missingPackageError);
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -252,7 +260,7 @@ describe("AgentEngine registry", () => {
 
     await expect(
       resolveEngine({ engineOption: { name: "ai-sdk:openai", config: {} } }),
-    ).rejects.toThrow(/requires optional packages/);
+    ).rejects.toMatchObject(missingPackageError);
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -342,9 +350,7 @@ describe("AgentEngine registry", () => {
       create,
     });
 
-    await expect(resolveEngine({})).rejects.toThrow(
-      /requires optional packages/,
-    );
+    await expect(resolveEngine({})).rejects.toMatchObject(missingPackageError);
     expect(create).not.toHaveBeenCalled();
   });
 

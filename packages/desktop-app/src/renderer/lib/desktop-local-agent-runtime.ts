@@ -84,6 +84,26 @@ export function pickDefaultDesktopLocalAgent(
   return undefined;
 }
 
+/**
+ * A bare saved "default" is not a choice: saved by an older build, it cannot be
+ * told from never having chosen, and must not pin the chat to the hosted
+ * default while a subscription runtime can run. Only this value records
+ * choosing the hosted default on purpose.
+ */
+const DESKTOP_AGENT_DEFAULT_PICKED = "default-picked";
+
+export function desktopAgentStorageValue(agent: string): string {
+  return agent === "default" ? DESKTOP_AGENT_DEFAULT_PICKED : agent;
+}
+
+/** The runtime the person chose for an app, or undefined when they never did. */
+export function desktopAgentFromStorage(
+  stored: string | null,
+): string | undefined {
+  if (!stored || stored === "default") return undefined;
+  return stored === DESKTOP_AGENT_DEFAULT_PICKED ? "default" : stored;
+}
+
 /** A runtime whose CLI is missing has no model options, so it has no probe state. */
 export type DesktopLocalRuntimeState = CodeAgentRuntimeState | "not-installed";
 
