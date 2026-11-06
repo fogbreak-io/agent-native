@@ -47,6 +47,8 @@ import {
   CLAUDE_CODE_NOT_INSTALLED_MESSAGE,
   createDesktopLocalAgentRuntime,
   describeClaudeCodeProblem,
+  desktopAgentFromStorage,
+  desktopAgentStorageValue,
   desktopLocalRuntimeNotice,
   desktopLocalRuntimeStatusLabel,
   pickDefaultDesktopLocalAgent,
@@ -161,6 +163,12 @@ function hasSignedInClaude(models: readonly CodeAgentModelOption[]): boolean {
   );
 }
 
+function hasClaudeCli(models: readonly CodeAgentModelOption[]): boolean {
+  return models.some(
+    (model) => model.engine === DESKTOP_LOCAL_AGENT_ENGINE_BY_ID["claude-code"],
+  );
+}
+
 type LocalCodeChangeState =
   | { status: "idle" }
   | { status: "starting"; message?: string }
@@ -244,10 +252,12 @@ export default function DesktopAppChatShell({
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(`desktop-app-agent:${appId}`);
-      if (stored) {
+      const saved = desktopAgentFromStorage(
+        localStorage.getItem(`desktop-app-agent:${appId}`),
+      );
+      if (saved) {
         agentChosenRef.current = true;
-        setSelectedAgent(stored);
+        setSelectedAgent(saved);
       }
       // coercion-ok: localStorage is optional renderer state; the explicit default remains active.
     } catch {
@@ -349,7 +359,10 @@ export default function DesktopAppChatShell({
       agentChosenRef.current = true;
       setSelectedAgent(agent);
       try {
-        localStorage.setItem(`desktop-app-agent:${appId}`, agent);
+        localStorage.setItem(
+          `desktop-app-agent:${appId}`,
+          desktopAgentStorageValue(agent),
+        );
         // coercion-ok: localStorage is optional renderer state; this mount already has the selection.
       } catch {
         // The selection still applies for this mount when storage is unavailable.
@@ -447,8 +460,18 @@ export default function DesktopAppChatShell({
       if (result.status !== "ok") {
         setClaudeSignIn({ status: "recheck-failed" });
       } else if (!hasSignedInClaude(result.models)) {
-        // Still signed out: drop "Finish signing in…" and offer the button again.
-        setClaudeSignIn({ status: "idle" });
+        // Still signed out: say so, and keep looking when the person returns
+        // while a sign-in is under way. Anything else (a launch failure, a
+        // missing CLI, a plain Try again) has nothing left to wait for.
+        const signInUnderWay = hasClaudeCli(result.models);
+        setClaudeSignIn((current) =>
+          signInUnderWay &&
+          (current.status === "opened" ||
+            current.status === "not-yet" ||
+            current.status === "recheck-failed")
+            ? { status: "not-yet" }
+            : { status: "idle" },
+        );
       }
     } catch {
       setLocalAgentModelsFailed(true);
@@ -461,7 +484,9 @@ export default function DesktopAppChatShell({
   useEffect(() => {
     if (
       claudeSignIn.status !== "opened" &&
-      claudeSignIn.status !== "recheck-failed"
+      claudeSignIn.status !== "not-yet" &&
+      claudeSignIn.status !== "recheck-failed" &&
+      claudeSignIn.status !== "failed"
     ) {
       return;
     }
@@ -494,6 +519,16 @@ export default function DesktopAppChatShell({
       selectedAgent,
     ],
   );
+
+  // The hosted default runs on the app's own server, which lists only the
+  // engines it can run. This list holds local CLI engines and engines whose
+  // package the server may not have, and the chat sends the picked engine to
+  // the server as is.
+  const chatModelCatalog = localAgentModelsLoading
+    ? availableModels
+    : selectedAgent === "default" || localAgentModels.length === 0
+      ? undefined
+      : availableModels;
 
   const localAgentId =
     selectedAgent === "default"
@@ -850,7 +885,9 @@ export default function DesktopAppChatShell({
                     signIn={claudeSignIn}
                     onSignIn={() => void startClaudeSignIn()}
                     onRetry={() => void recheckLocalAgents()}
-                    canRetry={localAgentModelsFailed}
+                    canRetry={
+                      localAgentModelsFailed || runtimeNotice?.canRetry === true
+                    }
                     retryBusy={rechecking}
                   />
                 ) : undefined
@@ -860,11 +897,7 @@ export default function DesktopAppChatShell({
               selectedAgent={selectedAgent}
               onAgentChange={handleAgentChange}
               onConnectLocalRuntime={handleLocalRuntimeSetup}
-              availableModels={
-                localAgentModelsLoading || localAgentModels.length > 0
-                  ? availableModels
-                  : undefined
-              }
+              availableModels={chatModelCatalog}
               modelListLoading={localAgentModelsLoading}
               runtime={localRuntime}
             >

@@ -633,6 +633,88 @@ describe("executeCodeAgentRun", () => {
     }
   });
 
+  it("approves Song's tools for each Codex invocation by that invocation's own mode, across follow-ups in one runner", async () => {
+    const root = useTempCodeAgentsHome();
+    for (const key of providerEnvKeys) delete process.env[key];
+    const binDir = path.join(root, "bin");
+    const logPath = path.join(root, "codex-invocations.jsonl");
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(binDir, "codex"),
+      [
+        "#!/usr/bin/env node",
+        "const fs = require('fs');",
+        "const args = process.argv.slice(2);",
+        `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, tokenInEnv: process.env.AGENT_NATIVE_MCP_DESKTOP_APP_SONG_STUDIO_TOKEN === 'fake-test-token' }) + '\\n');`,
+        "const outIndex = args.indexOf('--output-last-message');",
+        "if (outIndex !== -1) fs.writeFileSync(args[outIndex + 1], 'ok');",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+    process.env.MCP_SERVERS = JSON.stringify({
+      servers: {
+        desktop_app_song_studio: {
+          type: "http",
+          url: "http://127.0.0.1:8100/song-studio/mcp",
+          headers: { Authorization: "Bearer fake-test-token" },
+          startupTimeoutSec: 90,
+          approveTools: true,
+        },
+      },
+    });
+    const run = createCodeAgentRunRecord({
+      goalId: "task",
+      title: "Use Codex with Song",
+      status: "running",
+      phase: "executing",
+      permissionMode: "full-auto",
+      cwd: process.cwd(),
+      metadata: { engine: "codex-cli" },
+    });
+    for (const permissionMode of ["read-only", "full-auto"] as const) {
+      queueCodeAgentFollowUp({
+        runId: run.id,
+        prompt: `follow up as ${permissionMode}`,
+        mode: "queued",
+        permissionMode,
+        source: "test",
+      });
+    }
+
+    await executeCodeAgentRun({ runId: run.id, prompt: "list song projects" });
+
+    const invocations = fs
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map(
+        (line) => JSON.parse(line) as { args: string[]; tokenInEnv: boolean },
+      );
+    const tokenInEnv = invocations.map((invocation) => invocation.tokenInEnv);
+    const calls = invocations.map((invocation) => invocation.args);
+    const modeOf = (args: string[]) => args[args.indexOf("--sandbox") + 1];
+    const approves = (args: string[]) =>
+      args.includes(
+        'mcp_servers.desktop_app_song_studio.default_tools_approval_mode="approve"',
+      );
+    expect(calls.map(modeOf)).toEqual([
+      "workspace-write",
+      "read-only",
+      "workspace-write",
+    ]);
+    expect(calls.map(approves)).toEqual([true, false, true]);
+    // The token reaches Codex through its environment, never its command line.
+    expect(tokenInEnv).toEqual([true, true, true]);
+    expect(JSON.stringify(calls)).not.toContain("fake-test-token");
+    // The startup budget is not a permission; every invocation keeps it.
+    for (const args of calls) {
+      expect(args).toContain(
+        "mcp_servers.desktop_app_song_studio.startup_timeout_sec=90",
+      );
+    }
+  });
+
   it("completes the run and retries MCP config cleanup when the first delete fails", async () => {
     const root = useTempCodeAgentsHome();
     for (const key of providerEnvKeys) delete process.env[key];

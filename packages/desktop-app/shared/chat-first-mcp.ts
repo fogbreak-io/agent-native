@@ -4,6 +4,7 @@ import type {
   TestMcpUrlResult,
 } from "@agent-native/core/client/resources";
 
+// oracle-change(packages/desktop-app/shared/chat-first-mcp.spec.ts): its only subject, the always-unavailable remote MCP state, was removed with its last caller.
 export const CHAT_FIRST_MCP_IPC = {
   LIST: "chat-first:mcp:list",
   CREATE: "chat-first:mcp:create",
@@ -14,19 +15,6 @@ export const CHAT_FIRST_MCP_IPC = {
   START_OAUTH: "chat-first:mcp:start-oauth",
   IMPORT_PLUGIN: "chat-first:mcp:import-plugin",
 } as const;
-
-export const DESKTOP_REMOTE_MCP_UNAVAILABLE_REASON =
-  "Connected MCP settings require a secure desktop MCP capability broker.";
-
-export function desktopRemoteMcpUnavailable(): {
-  state: "unavailable";
-  error: string;
-} {
-  return {
-    state: "unavailable",
-    error: DESKTOP_REMOTE_MCP_UNAVAILABLE_REASON,
-  };
-}
 
 export type ChatFirstMcpServer = McpServer;
 export type ChatFirstMcpServersList = McpServersList;

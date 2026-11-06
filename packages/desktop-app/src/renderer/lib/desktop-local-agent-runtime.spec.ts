@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDesktopLocalAgentRuntime,
   describeClaudeCodeProblem,
+  desktopAgentFromStorage,
+  desktopAgentStorageValue,
   desktopLocalRuntimeNotice,
   desktopLocalRuntimeStatusLabel,
   pickDefaultDesktopLocalAgent,
@@ -375,6 +377,27 @@ describe("pickDefaultDesktopLocalAgent", () => {
   });
 });
 
+describe("saved runtime choice", () => {
+  it("reads a bare saved default as no choice", () => {
+    expect(desktopAgentFromStorage("default")).toBeUndefined();
+    expect(desktopAgentFromStorage(null)).toBeUndefined();
+    expect(desktopAgentFromStorage("")).toBeUndefined();
+  });
+
+  it("keeps an explicit pick of any runtime, hosted default included", () => {
+    for (const agent of ["default", "claude-code", "codex", "opencode"]) {
+      expect(desktopAgentFromStorage(desktopAgentStorageValue(agent))).toBe(
+        agent,
+      );
+    }
+  });
+
+  it("never saves a pick of the hosted default as the bare legacy value", () => {
+    expect(desktopAgentStorageValue("default")).not.toBe("default");
+    expect(desktopAgentStorageValue("codex")).toBe("codex");
+  });
+});
+
 describe("Claude Code state in plain words", () => {
   it("keeps signed out, API-key only, unreadable and not installed apart", () => {
     expect(describeClaudeCodeProblem("signed-in")).toBeUndefined();
@@ -416,6 +439,7 @@ describe("Claude Code state in plain words", () => {
       message:
         "Claude Code is installed but not signed in. This panel is using Codex.",
       canSignIn: true,
+      canRetry: false,
     });
   });
 
@@ -457,6 +481,7 @@ describe("Claude Code state in plain words", () => {
       message:
         "Fogbreak couldn't check which local agents are installed or signed in.",
       canSignIn: false,
+      canRetry: true,
     });
   });
 });
