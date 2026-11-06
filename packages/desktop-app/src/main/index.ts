@@ -20,7 +20,6 @@ import {
   isDefaultDesktopTemplateDevTarget,
 } from "@shared/app-registry";
 import type { AppConfig, DesktopAppLaunchBehavior } from "@shared/app-registry";
-import { desktopRemoteMcpUnavailable } from "@shared/chat-first-mcp";
 import { requiresConfiguredCodeAgentProvider } from "@shared/code-agent-readiness";
 import {
   CODE_AGENTS_SURFACE_ID,
@@ -190,11 +189,6 @@ import {
   FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
-import {
-  mintSongStudioMcpEntry,
-  signInSongStudioLocally,
-} from "./song-studio-local-session.js";
-import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -268,6 +262,10 @@ import { contentFilesWebviewDenialReason } from "./content-files-webview-access.
 import { deriveContentFilesRepositoryIdentity } from "./content-files/local-identity";
 import { readCookieHeaderForUrl } from "./cookie-header.js";
 import { DesktopDesignPreviewManager } from "./design-preview-manager";
+import {
+  resolveDesktopAppMcpServer,
+  type DesktopMcpNotice,
+} from "./desktop-app-mcp-servers.js";
 import { captureDesktopBrowserScreenshot } from "./desktop-browser-screenshot";
 import {
   DESKTOP_IDENTITY_PARTITION,
@@ -356,8 +354,15 @@ import {
   installSentryWebContentsInstrumentation,
   setSentryWebContentsMetadata,
 } from "./sentry";
+import {
+  createSongStudioLocalSession,
+  mintSongStudioMcpEntry,
+  signInSongStudioLocally,
+  warmSongStudioMcp,
+} from "./song-studio-local-session.js";
 import { setMailWebviewBackgroundThrottling } from "./webview-background-throttling.js";
 import { installWebviewNavigationListeners } from "./webview-navigation";
+import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import { installWindowDragController } from "./window-drag";
 import { loadDesktopWorkspaceApps } from "./workspace-apps.js";
 
@@ -5855,48 +5860,37 @@ async function resolveDesktopMcpHost(): Promise<{
   };
 }
 
-let songStudioLocalSignInAt = 0;
-let songStudioLocalSignInPending: Promise<void> | null = null;
-const SONG_STUDIO_LOCAL_SIGN_IN_TTL_MS = 10 * 60 * 1000;
+const songStudioPartition = () =>
+  session.fromPartition("persist:app-song-studio");
+
+const songStudioLog = (
+  message: string,
+  fields?: Record<string, string | number>,
+) => console.info(`[song-studio] ${message}`, fields ?? {});
+
+const songStudioLocalSession = createSongStudioLocalSession({
+  signIn: () => signInSongStudioLocally(songStudioPartition()),
+  warmUp: () =>
+    warmSongStudioMcp({
+      readCookies: () =>
+        cookieHeaderForRelay(songStudioPartition(), FOGBREAK_SONG_STUDIO_URL),
+      log: songStudioLog,
+    }),
+  log: songStudioLog,
+});
 
 function ensureSongStudioLocalSession(force = false): Promise<void> {
-  if (
-    !force &&
-    songStudioLocalSignInAt &&
-    Date.now() - songStudioLocalSignInAt < SONG_STUDIO_LOCAL_SIGN_IN_TTL_MS
-  ) {
-    return Promise.resolve();
-  }
-  if (songStudioLocalSignInPending) return songStudioLocalSignInPending;
-  songStudioLocalSignInPending = signInSongStudioLocally(
-    session.fromPartition("persist:app-song-studio"),
-  )
-    .then((result) => {
-      if (result.ok) {
-        songStudioLocalSignInAt = Date.now();
-        console.info("[song-studio] signed in with the local identity");
-      } else {
-        console.info("[song-studio] local sign-in not available", {
-          reason: result.reason,
-        });
-      }
-    })
-    .finally(() => {
-      songStudioLocalSignInPending = null;
-    });
-  return songStudioLocalSignInPending;
+  return songStudioLocalSession.ensure(force);
 }
 
 interface DesktopCodeAgentMcpEnvironment {
   env: NodeJS.ProcessEnv;
-  remoteConfig:
-    | { state: "loaded"; serverCount: number }
-    | { state: "unavailable"; error: string };
+  notices: DesktopMcpNotice[];
 }
 
 async function desktopCodeAgentMcpEnvironment(
   cwd: string,
-  options: { includeWorkspaceApps?: boolean } = {},
+  options: { includeWorkspaceApps?: boolean; permissionMode?: string } = {},
 ): Promise<DesktopCodeAgentMcpEnvironment> {
   const workspaceRoot = resolveCodeAgentsTerminalCwd({});
   const workspaceConfig = loadMcpConfig(workspaceRoot);
@@ -5907,8 +5901,7 @@ async function desktopCodeAgentMcpEnvironment(
   };
   const allowlist = new Set(Object.keys(servers));
   const appIds: string[] = [];
-  const remoteConfig: DesktopCodeAgentMcpEnvironment["remoteConfig"] =
-    desktopRemoteMcpUnavailable();
+  const notices: DesktopMcpNotice[] = [];
 
   if (options.includeWorkspaceApps === false) {
     return {
@@ -5933,7 +5926,7 @@ async function desktopCodeAgentMcpEnvironment(
           "skills",
         ),
       },
-      remoteConfig,
+      notices,
     };
   }
 
@@ -5945,31 +5938,26 @@ async function desktopCodeAgentMcpEnvironment(
     const appMcpUrl = desktopAppMcpUrl(baseUrl);
     const appSession = session.fromPartition(`persist:app-${appConfig.id}`);
     const cookieHeader = await cookieHeaderForRelay(appSession, appMcpUrl);
-    if (appConfig.id === "song-studio") {
-      // Song Studio's MCP wants the connection entry from its own connect route,
-      // not the browser cookie. Fall back to the cookie if it cannot be minted.
-      await ensureSongStudioLocalSession();
-      const songCookies = await cookieHeaderForRelay(appSession, baseUrl);
-      const entry = await mintSongStudioMcpEntry(songCookies, baseUrl);
-      if (entry) {
-        servers[serverId] = {
-          ...entry,
-          description: `${appConfig.name} workspace app tools`,
-        };
-        allowlist.add(serverId);
-        appIds.push(appConfig.id);
-        continue;
-      }
-    } else if (!cookieHeader) {
-      // A hosted fogbreak.io app with no login has no tools to offer.
+    const resolution = await resolveDesktopAppMcpServer({
+      app: { id: appConfig.id, name: appConfig.name },
+      serverId,
+      mcpUrl: appMcpUrl,
+      cookieHeader: cookieHeader ?? "",
+      permissionMode: options.permissionMode ?? "",
+      songStudio: {
+        baseUrl,
+        readSessionCookies: async () => {
+          await ensureSongStudioLocalSession();
+          return cookieHeaderForRelay(appSession, baseUrl);
+        },
+        mint: mintSongStudioMcpEntry,
+      },
+    });
+    if (resolution.state === "omitted") {
+      if (resolution.notice) notices.push(resolution.notice);
       continue;
     }
-    servers[serverId] = {
-      type: "http",
-      url: appMcpUrl,
-      ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : {}),
-      description: `${appConfig.name} workspace app tools`,
-    };
+    servers[serverId] = resolution.server;
     allowlist.add(serverId);
     appIds.push(appConfig.id);
   }
@@ -5986,7 +5974,7 @@ async function desktopCodeAgentMcpEnvironment(
         "skills",
       ),
     },
-    remoteConfig,
+    notices,
   };
 }
 
@@ -6185,16 +6173,14 @@ async function spawnCodeAgentRunner(
     });
     const mcpEnvironment = await desktopCodeAgentMcpEnvironment(cwd, {
       includeWorkspaceApps: true,
+      permissionMode: normalizedPermissionMode,
     });
-    if (mcpEnvironment.remoteConfig.state === "unavailable") {
-      appendCodeAgentStatusEvent(
-        runId,
-        "Connected MCP settings could not be loaded for this chat.",
-        {
-          source: "desktop-mcp-config",
-          error: mcpEnvironment.remoteConfig.error,
-        },
-      );
+    for (const notice of mcpEnvironment.notices) {
+      appendCodeAgentStatusEvent(runId, notice.message, {
+        source: "desktop-mcp-config",
+        serverId: notice.serverId,
+        reason: notice.reason,
+      });
     }
     const computerEnv = desktopComputerChildEnv(
       runId,

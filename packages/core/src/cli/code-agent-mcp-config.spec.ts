@@ -387,3 +387,73 @@ describe("code-agent MCP config", () => {
     expect(codexMcpConfigArgs(null, environment)).toEqual([]);
   });
 });
+
+describe("Codex settings carried by an MCP_SERVERS entry", () => {
+  const songEntry = {
+    type: "http",
+    url: "http://127.0.0.1:8100/song-studio/mcp",
+    headers: { Authorization: "Bearer fake-test-token" },
+    startupTimeoutSec: 90,
+    approveTools: true,
+  };
+  const envWith = (entry: Record<string, unknown>) =>
+    ({
+      MCP_SERVERS: JSON.stringify({
+        servers: { desktop_app_song_studio: entry },
+      }),
+    }) as NodeJS.ProcessEnv;
+
+  it("gives Codex the url, bearer header, a 90 s startup budget and tool approval", () => {
+    expect(codexMcpConfigArgs(null, envWith(songEntry))).toEqual([
+      "-c",
+      'mcp_servers.desktop_app_song_studio.url="http://127.0.0.1:8100/song-studio/mcp"',
+      "-c",
+      'mcp_servers.desktop_app_song_studio.http_headers={"Authorization"="Bearer fake-test-token"}',
+      "-c",
+      "mcp_servers.desktop_app_song_studio.startup_timeout_sec=90",
+      "-c",
+      'mcp_servers.desktop_app_song_studio.default_tools_approval_mode="approve"',
+    ]);
+  });
+
+  it("adds neither setting for an entry that does not ask for them", () => {
+    const { startupTimeoutSec, approveTools, ...plain } = songEntry;
+    void startupTimeoutSec;
+    void approveTools;
+    const args = codexMcpConfigArgs(null, envWith(plain)).join("\n");
+    expect(args).not.toContain("startup_timeout_sec");
+    expect(args).not.toContain("default_tools_approval_mode");
+  });
+
+  it("does not approve tools when the entry says false", () => {
+    expect(
+      codexMcpConfigArgs(
+        null,
+        envWith({ ...songEntry, approveTools: false }),
+      ).join("\n"),
+    ).not.toContain("default_tools_approval_mode");
+  });
+
+  it("rejects a bad setting loudly instead of dropping it", () => {
+    for (const startupTimeoutSec of [0, 601, 1.5, "90", null]) {
+      expect(() =>
+        codexMcpConfigArgs(null, envWith({ ...songEntry, startupTimeoutSec })),
+      ).toThrow(/startupTimeoutSec/);
+    }
+    expect(() =>
+      codexMcpConfigArgs(null, envWith({ ...songEntry, approveTools: "yes" })),
+    ).toThrow(/approveTools/);
+  });
+
+  it("keeps Codex-only settings out of Claude's config", () => {
+    expect(claudeMcpConfig(null, envWith(songEntry))).toEqual({
+      mcpServers: {
+        desktop_app_song_studio: {
+          type: "http",
+          url: "http://127.0.0.1:8100/song-studio/mcp",
+          headers: { Authorization: "Bearer fake-test-token" },
+        },
+      },
+    });
+  });
+});
