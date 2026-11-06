@@ -1616,7 +1616,9 @@ async function executeCodexCliRun(options: {
   const mcpPromptNotice = codeAgentMcpPromptNotice(mcpConfig);
   appendCodeAgentMcpConfigurationErrors(options.run.id, mcpConfig);
   const args = [
-    ...codexMcpConfigArgs(mcpConfig),
+    ...codexMcpConfigArgs(mcpConfig, process.env, {
+      permissionMode: options.permissionMode,
+    }),
     "--ask-for-approval",
     "never",
     "--sandbox",

@@ -3,6 +3,7 @@ import {
   type McpConfig,
   type McpServerConfig,
 } from "../mcp-client/config.js";
+import type { CodeAgentPermissionMode } from "./code-agent-runs.js";
 
 const DESKTOP_MCP_ALLOWLIST_ENV =
   "AGENT_NATIVE_CODE_AGENT_MCP_SERVER_ALLOWLIST";
@@ -128,10 +129,20 @@ export function mergeCodeAgentMcpConfig(
   };
 }
 
+/**
+ * `options.permissionMode` is the mode of the Codex invocation these args are
+ * for. A run can change mode between invocations (a queued follow-up), so the
+ * approval below is decided here, per invocation, and never stored in the
+ * entry; an entry's `approveTools` only says approval is allowed.
+ */
 export function codexMcpConfigArgs(
   config: McpConfig | null = null,
   environment: NodeJS.ProcessEnv = process.env,
+  options: { permissionMode?: CodeAgentPermissionMode } = {},
 ): string[] {
+  const mayApprove =
+    options.permissionMode === "auto-edit" ||
+    options.permissionMode === "full-auto";
   const args: string[] = [];
   for (const [key, server] of codeAgentHttpMcpServers(config, environment)) {
     args.push("-c", `mcp_servers.${key}.url=${tomlString(server.url)}`);
@@ -148,8 +159,9 @@ export function codexMcpConfigArgs(
       );
     }
     // The CLI runs with `--ask-for-approval never`, so a tool that needs
-    // approval is refused instead of asked about.
-    if (server.approveTools) {
+    // approval is refused instead of asked about. Only a write-capable
+    // invocation may pre-approve; a read-only one keeps Codex's own refusal.
+    if (server.approveTools && mayApprove) {
       args.push(
         "-c",
         `mcp_servers.${key}.default_tools_approval_mode="approve"`,

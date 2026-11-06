@@ -1,7 +1,7 @@
 import {
   songStudioToolsUnavailableNotice,
   type SongStudioMcpEntry,
-  type SongStudioMcpMintResult,
+  type SongStudioReadyResult,
 } from "./song-studio-local-session.js";
 
 /** Longer than Codex's 30 s default, which a cold Song route can outlast. */
@@ -11,7 +11,10 @@ export interface DesktopAppMcpServer extends SongStudioMcpEntry {
   description: string;
   /** Codex-only; see `codexMcpConfigArgs`. */
   startupTimeoutSec?: number;
-  /** Codex-only; lets a write-capable run call this server's tools. */
+  /**
+   * Codex-only. Says approval is allowed, not that it is given: Codex decides
+   * per invocation from that invocation's permission mode.
+   */
   approveTools?: boolean;
 }
 
@@ -29,52 +32,53 @@ export interface DesktopAppMcpInput {
   app: { id: string; name: string };
   serverId: string;
   mcpUrl: string;
+  /** The app the run was opened from, when it was opened from one. */
+  boundAppId?: string | undefined;
   /** Browser cookies for `mcpUrl`; empty when the app has no login. */
   cookieHeader: string;
-  permissionMode: string;
   songStudio: {
-    baseUrl: string;
-    /** Signs in locally if needed and returns the Song cookie header. */
-    readSessionCookies: () => Promise<string>;
-    mint: (
-      cookieHeader: string,
-      baseUrl: string,
-    ) => Promise<SongStudioMcpMintResult>;
+    /**
+     * Signs in locally if needed, then mints Song's entry and warms its MCP
+     * route inside one bounded wait.
+     */
+    prepare: () => Promise<SongStudioReadyResult>;
   };
 }
 
-// Same split Claude's driver/watchdog uses: only a write-capable run may call
-// Song tools without asking, and a Codex run cannot ask.
-function isWriteCapablePermissionMode(mode: string): boolean {
-  return mode === "auto-edit" || mode === "full-auto";
+export const SONG_STUDIO_APP_ID = "song-studio";
+
+/** The app a chat run was opened from, as the renderer records it. */
+export function boundAppIdFromRunMetadata(
+  metadata: unknown,
+): string | undefined {
+  if (typeof metadata !== "object" || metadata === null) return undefined;
+  const appId = (metadata as { appId?: unknown }).appId;
+  return typeof appId === "string" && appId ? appId : undefined;
 }
 
 /**
  * Decides what MCP server, if any, one workspace app contributes to a run.
- * Song Studio's MCP rejects the browser cookie, so when its connection entry
- * cannot be minted the server is left out and the run says why. A cookie entry
- * would only fail with a 401 inside the CLI.
+ * Song Studio's MCP rejects the browser cookie, so its entry is minted and the
+ * route warmed before the CLI starts; only a run opened from Song waits for
+ * that, and only such a run is told when Song was left out. When the entry
+ * cannot be made ready in time the server is omitted: a cookie entry would
+ * only fail with a 401 inside the CLI.
  */
 export async function resolveDesktopAppMcpServer(
   input: DesktopAppMcpInput,
 ): Promise<DesktopAppMcpResolution> {
   const description = `${input.app.name} workspace app tools`;
-  if (input.app.id === "song-studio") {
-    const cookies = await input.songStudio.readSessionCookies();
-    const minted = await input.songStudio.mint(
-      cookies,
-      input.songStudio.baseUrl,
-    );
-    if (minted.state === "minted") {
+  if (input.app.id === SONG_STUDIO_APP_ID) {
+    if (input.boundAppId !== SONG_STUDIO_APP_ID) return { state: "omitted" };
+    const ready = await input.songStudio.prepare();
+    if (ready.state === "ready") {
       return {
         state: "ready",
         server: {
-          ...minted.entry,
+          ...ready.entry,
           description,
           startupTimeoutSec: SONG_STUDIO_MCP_STARTUP_TIMEOUT_SEC,
-          ...(isWriteCapablePermissionMode(input.permissionMode)
-            ? { approveTools: true }
-            : {}),
+          approveTools: true,
         },
       };
     }
@@ -82,8 +86,8 @@ export async function resolveDesktopAppMcpServer(
       state: "omitted",
       notice: {
         serverId: input.serverId,
-        reason: minted.reason,
-        message: songStudioToolsUnavailableNotice(minted),
+        reason: ready.reason,
+        message: songStudioToolsUnavailableNotice(ready),
       },
     };
   }

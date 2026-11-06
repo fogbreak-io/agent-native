@@ -162,6 +162,9 @@ export interface SongStudioMintOptions {
   timeoutMs?: number;
   maxAttempts?: number;
   createTimeoutSignal?: (ms: number) => AbortSignal;
+  /** No attempt starts, or waits, past this instant (`now()` scale). */
+  deadlineAt?: number;
+  now?: () => number;
 }
 
 type MintAttempt =
@@ -209,9 +212,16 @@ async function mintOnce(
         retryable: response.status >= 500,
       };
     }
-    const payload = (await response.json()) as {
+    let payload: {
       mcpServerEntry?: { type?: string; url?: unknown; headers?: unknown };
     };
+    try {
+      payload = await response.json();
+    } catch (error) {
+      // A 200 that is not JSON is Song answering wrongly, not Song being away.
+      if (isTimeoutError(error)) throw error;
+      return { state: "unavailable", reason: "malformed", retryable: false };
+    }
     const entry = payload.mcpServerEntry;
     if (!entry || entry.type !== "http" || typeof entry.url !== "string") {
       return { state: "unavailable", reason: "malformed", retryable: false };
@@ -267,19 +277,30 @@ export async function mintSongStudioMcpEntry(
   const basePath = base.pathname.replace(/\/+$/, "");
   const target = `${base.origin}${basePath}/_agent-native/mcp/connect/token`;
 
+  const now = options.now ?? Date.now;
+
   let attempts = 0;
+  let lastReason: SongStudioMcpUnavailableReason = "timed-out";
   for (;;) {
+    const remainingMs =
+      options.deadlineAt === undefined
+        ? timeoutMs
+        : Math.min(timeoutMs, options.deadlineAt - now());
+    if (remainingMs <= 0) {
+      return { state: "unavailable", reason: lastReason, attempts };
+    }
     attempts += 1;
     const attempt = await mintOnce(
       target,
       base.origin,
       cookieHeader,
       fetchImpl,
-      createTimeoutSignal(timeoutMs),
+      createTimeoutSignal(remainingMs),
     );
     if (attempt.state === "minted") {
       return { state: "minted", entry: attempt.entry };
     }
+    lastReason = attempt.reason;
     if (!attempt.retryable || attempts >= maxAttempts) {
       return {
         state: "unavailable",
@@ -292,9 +313,10 @@ export async function mintSongStudioMcpEntry(
 }
 
 /** The plain status line a run shows when Song's tools were left out of it. */
-export function songStudioToolsUnavailableNotice(
-  result: Extract<SongStudioMcpMintResult, { state: "unavailable" }>,
-): string {
+export function songStudioToolsUnavailableNotice(result: {
+  reason: SongStudioMcpUnavailableReason;
+  status?: number;
+}): string {
   switch (result.reason) {
     case "timed-out":
     case "unreachable":
@@ -315,52 +337,59 @@ export type SongStudioLog = (
   fields?: Record<string, string | number>,
 ) => void;
 
-export type SongStudioWarmUpResult =
-  | { state: "warm" }
+/** Everything a run waits for before Song's tools may be handed to a CLI. */
+export const SONG_STUDIO_READY_BUDGET_MS = 90_000;
+
+export type SongStudioReadyResult =
+  | { state: "ready"; entry: SongStudioMcpEntry }
   | {
-      state: "cold";
+      state: "unavailable";
       stage: "mint" | "initialize";
       reason: SongStudioMcpUnavailableReason;
       status?: number;
     };
 
-export interface SongStudioWarmUpDeps {
+export interface SongStudioPrepareDeps {
   readCookies: () => Promise<string>;
   songStudioUrl?: string;
   fetchImpl?: typeof fetch;
   log?: SongStudioLog;
-  options?: SongStudioMintOptions;
+  options?: SongStudioMintOptions & { budgetMs?: number };
 }
 
 /**
- * Pays Song's cold-route compile cost before a chat needs it: mint a connection
- * entry, then send the MCP `initialize` the CLIs send. Logs states only; the
- * minted entry and the cookie never leave this function.
+ * Mints a connection entry and sends the MCP `initialize` the CLIs send, so
+ * Song's cold routes are compiled before a CLI starts: a CLI that meets a
+ * slow server starts its first turn without the server's tools. Mint, retry
+ * and ping together stay inside one budget. Logs states only; the entry and
+ * the cookie never reach a log.
  */
-export async function warmSongStudioMcp(
-  deps: SongStudioWarmUpDeps,
-): Promise<SongStudioWarmUpResult> {
+export async function prepareSongStudioMcp(
+  deps: SongStudioPrepareDeps,
+): Promise<SongStudioReadyResult> {
   const songStudioUrl = deps.songStudioUrl ?? FOGBREAK_SONG_STUDIO_URL;
   const fetchImpl = deps.fetchImpl ?? fetch;
   const log = deps.log ?? (() => undefined);
-  const timeoutMs = deps.options?.timeoutMs ?? SONG_STUDIO_MINT_TIMEOUT_MS;
+  const now = deps.options?.now ?? Date.now;
   const createTimeoutSignal =
     deps.options?.createTimeoutSignal ??
     ((ms: number) => AbortSignal.timeout(ms));
+  const deadlineAt =
+    now() + (deps.options?.budgetMs ?? SONG_STUDIO_READY_BUDGET_MS);
 
   const minted = await mintSongStudioMcpEntry(
     await deps.readCookies(),
     songStudioUrl,
     fetchImpl,
-    deps.options,
+    { ...deps.options, deadlineAt, now },
   );
   if (minted.state !== "minted") {
-    log("warm-up: connection entry not minted", {
+    log("song readiness: connection entry not minted", {
       reason: minted.reason,
       attempts: minted.attempts,
     });
     return {
-      state: "cold",
+      state: "unavailable",
       stage: "mint",
       reason: minted.reason,
       ...(minted.status !== undefined ? { status: minted.status } : {}),
@@ -368,8 +397,23 @@ export async function warmSongStudioMcp(
   }
   // The entry's credential only goes to a local address.
   if (!isLoopbackSongStudioUrl(minted.entry.url)) {
-    log("warm-up: MCP address is not local", { reason: "not-local" });
-    return { state: "cold", stage: "initialize", reason: "not-local" };
+    log("song readiness: MCP address is not local", { reason: "not-local" });
+    return {
+      state: "unavailable",
+      stage: "initialize",
+      reason: "not-local",
+    };
+  }
+  const remainingMs = deadlineAt - now();
+  if (remainingMs <= 0) {
+    log("song readiness: no time left for MCP initialize", {
+      reason: "timed-out",
+    });
+    return {
+      state: "unavailable",
+      stage: "initialize",
+      reason: "timed-out",
+    };
   }
   try {
     const response = await fetchImpl(minted.entry.url, {
@@ -386,31 +430,54 @@ export async function warmSongStudioMcp(
         params: {
           protocolVersion: "2025-03-26",
           capabilities: {},
-          clientInfo: { name: "fogbreak-desktop-warmup", version: "1" },
+          clientInfo: { name: "fogbreak-desktop-readiness", version: "1" },
         },
       }),
-      signal: createTimeoutSignal(timeoutMs),
+      signal: createTimeoutSignal(remainingMs),
     });
     await response.body?.cancel().catch(() => undefined);
     if (!response.ok) {
-      log("warm-up: MCP initialize refused", {
+      log("song readiness: MCP initialize refused", {
         reason: "rejected",
         status: response.status,
       });
       return {
-        state: "cold",
+        state: "unavailable",
         stage: "initialize",
         reason: "rejected",
         status: response.status,
       };
     }
-    log("warm-up: Song Studio MCP is warm");
-    return { state: "warm" };
+    log("song readiness: Song Studio MCP answered");
+    return { state: "ready", entry: minted.entry };
   } catch (error) {
     const reason = isTimeoutError(error) ? "timed-out" : "unreachable";
-    log("warm-up: MCP initialize did not answer", { reason });
-    return { state: "cold", stage: "initialize", reason };
+    log("song readiness: MCP initialize did not answer", { reason });
+    return { state: "unavailable", stage: "initialize", reason };
   }
+}
+
+export type SongStudioWarmUpResult =
+  | { state: "warm" }
+  | {
+      state: "cold";
+      stage: "mint" | "initialize";
+      reason: SongStudioMcpUnavailableReason;
+      status?: number;
+    };
+
+/** Background form of `prepareSongStudioMcp`: pays the cold cost, keeps nothing. */
+export async function warmSongStudioMcp(
+  deps: SongStudioPrepareDeps,
+): Promise<SongStudioWarmUpResult> {
+  const result = await prepareSongStudioMcp(deps);
+  if (result.state === "ready") return { state: "warm" };
+  return {
+    state: "cold",
+    stage: result.stage,
+    reason: result.reason,
+    ...(result.status !== undefined ? { status: result.status } : {}),
+  };
 }
 
 export interface SongStudioLocalSessionDeps {

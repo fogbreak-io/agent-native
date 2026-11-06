@@ -4,8 +4,10 @@ import {
   SONG_STUDIO_MINT_TIMEOUT_MS,
   createSongStudioLocalSession,
   isLoopbackSongStudioUrl,
+  SONG_STUDIO_READY_BUDGET_MS,
   mintSongStudioMcpEntry,
   parseSetCookie,
+  prepareSongStudioMcp,
   signInSongStudioLocally,
   songStudioToolsUnavailableNotice,
   warmSongStudioMcp,
@@ -223,20 +225,11 @@ describe("song studio MCP entry", () => {
   });
 
   it("words a cold Song as still starting and a refusal as a refusal", () => {
+    expect(songStudioToolsUnavailableNotice({ reason: "timed-out" })).toBe(
+      "Song tools unavailable: Song Studio is still starting",
+    );
     expect(
-      songStudioToolsUnavailableNotice({
-        state: "unavailable",
-        reason: "timed-out",
-        attempts: 2,
-      }),
-    ).toBe("Song tools unavailable: Song Studio is still starting");
-    expect(
-      songStudioToolsUnavailableNotice({
-        state: "unavailable",
-        reason: "rejected",
-        status: 401,
-        attempts: 1,
-      }),
+      songStudioToolsUnavailableNotice({ reason: "rejected", status: 401 }),
     ).toContain("HTTP 401");
   });
 });
@@ -422,5 +415,131 @@ describe("song studio local session", () => {
       }),
     );
     expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
+  });
+});
+
+describe("song studio MCP entry answers", () => {
+  it("maps a 200 that is not JSON to malformed, without a retry", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("<html>starting</html>", { status: 200 }),
+      );
+    expect(
+      await mintSongStudioMcpEntry(COOKIE, SONG_URL, fetchImpl as never),
+    ).toEqual({ state: "unavailable", reason: "malformed", attempts: 1 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("song studio readiness before a run", () => {
+  // Every request below "takes" exactly as long as the timeout it was given.
+  function slowSong() {
+    let clock = 0;
+    let lastTimeoutMs = 0;
+    const timeouts: number[] = [];
+    const fetchImpl = vi.fn(async () => {
+      clock += lastTimeoutMs;
+      throw timeoutError();
+    });
+    return {
+      fetchImpl,
+      timeouts,
+      elapsed: () => clock,
+      options: {
+        now: () => clock,
+        createTimeoutSignal: (ms: number) => {
+          lastTimeoutMs = ms;
+          timeouts.push(ms);
+          return new AbortController().signal;
+        },
+      },
+    };
+  }
+
+  it("gives up inside its budget however slow Song is, and says which step", async () => {
+    expect(SONG_STUDIO_READY_BUDGET_MS).toBe(90_000);
+    const song = slowSong();
+    const result = await prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      songStudioUrl: SONG_URL,
+      fetchImpl: song.fetchImpl as never,
+      options: song.options,
+    });
+    expect(result).toEqual({
+      state: "unavailable",
+      stage: "mint",
+      reason: "timed-out",
+    });
+    expect(song.elapsed()).toBeLessThanOrEqual(90_000);
+    expect(song.timeouts).toEqual([90_000]);
+  });
+
+  it("spends what the first attempt left on the retry and on the ping", async () => {
+    let clock = 0;
+    const timeouts: number[] = [];
+    const fetchImpl = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        clock += 50_000;
+        throw timeoutError();
+      })
+      .mockImplementationOnce(async () => {
+        clock += 20_000;
+        return mintedResponse();
+      })
+      .mockImplementationOnce(async () => new Response("{}", { status: 200 }));
+    const result = await prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      songStudioUrl: SONG_URL,
+      fetchImpl: fetchImpl as never,
+      options: {
+        now: () => clock,
+        createTimeoutSignal: (ms: number) => {
+          timeouts.push(ms);
+          return new AbortController().signal;
+        },
+      },
+    });
+    expect(result).toEqual({ state: "ready", entry: MINTED_ENTRY });
+    expect(timeouts).toEqual([90_000, 40_000, 20_000]);
+  });
+
+  it("is not ready when the MCP route does not answer in time", async () => {
+    let clock = 0;
+    const fetchImpl = vi
+      .fn()
+      .mockImplementationOnce(async () => mintedResponse())
+      .mockImplementationOnce(async () => {
+        clock += 90_000;
+        throw timeoutError();
+      });
+    const result = await prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      songStudioUrl: SONG_URL,
+      fetchImpl: fetchImpl as never,
+      options: { now: () => clock },
+    });
+    expect(result).toEqual({
+      state: "unavailable",
+      stage: "initialize",
+      reason: "timed-out",
+    });
+  });
+
+  it("does not ping when the mint used up the budget", async () => {
+    let clock = 0;
+    const fetchImpl = vi.fn().mockImplementationOnce(async () => {
+      clock += 90_000;
+      return mintedResponse();
+    });
+    const result = await prepareSongStudioMcp({
+      readCookies: async () => COOKIE,
+      songStudioUrl: SONG_URL,
+      fetchImpl: fetchImpl as never,
+      options: { now: () => clock },
+    });
+    expect(result).toMatchObject({ state: "unavailable", stage: "initialize" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
