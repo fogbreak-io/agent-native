@@ -190,11 +190,6 @@ import {
   FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
-import {
-  mintSongStudioMcpEntry,
-  signInSongStudioLocally,
-} from "./song-studio-local-session.js";
-import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -354,8 +349,13 @@ import {
   installSentryWebContentsInstrumentation,
   setSentryWebContentsMetadata,
 } from "./sentry";
+import {
+  mintSongStudioMcpEntry,
+  signInSongStudioLocally,
+} from "./song-studio-local-session.js";
 import { setMailWebviewBackgroundThrottling } from "./webview-background-throttling.js";
 import { installWebviewNavigationListeners } from "./webview-navigation";
+import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import { installWindowDragController } from "./window-drag";
 import { loadDesktopWorkspaceApps } from "./workspace-apps.js";
 
@@ -13202,13 +13202,16 @@ registerAppsIpc({
       .get({ url: dispatchOrigin })
       .then((cookies) =>
         cookies.length === 0
-          ? ({ enabled: false, apps: [] } satisfies DesktopWorkspaceAppListResult)
+          ? ({
+              enabled: false,
+              apps: [],
+            } satisfies DesktopWorkspaceAppListResult)
           : loadDesktopWorkspaceApps({ identitySession, dispatchOrigin }),
       )
       .then((result) => {
-      cacheDesktopWorkspaceApps(result, generation);
-      return result;
-    });
+        cacheDesktopWorkspaceApps(result, generation);
+        return result;
+      });
   },
 });
 

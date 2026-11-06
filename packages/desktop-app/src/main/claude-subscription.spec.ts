@@ -118,7 +118,9 @@ describe("readClaudeSubscriptionStatus", () => {
       stderr: "",
     });
 
-    await expect(readClaudeSubscriptionStatus(  { execute })).resolves.toMatchObject({
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
       providerId: "claude",
       connectionState: "needs-sign-in",
       authMethod: "none",
@@ -133,7 +135,9 @@ describe("readClaudeSubscriptionStatus", () => {
       spawnErrorCode: "ENOENT",
     });
 
-    await expect(readClaudeSubscriptionStatus({ execute })).resolves.toMatchObject({
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
       connectionState: "unavailable",
       connectionMessage: "Claude Code was not found on this computer.",
     });
@@ -143,8 +147,7 @@ describe("readClaudeSubscriptionStatus", () => {
     {
       name: "timeout",
       result: { exitCode: null, stdout: "", stderr: "", timedOut: true },
-      message:
-        "Claude Code did not answer when asked whether it is signed in.",
+      message: "Claude Code did not answer when asked whether it is signed in.",
     },
     {
       name: "spawn failure other than a missing CLI",
@@ -198,7 +201,9 @@ describe("readClaudeSubscriptionStatus", () => {
       throw new Error("spawn exploded");
     };
 
-    await expect(readClaudeSubscriptionStatus({ execute })).resolves.toMatchObject({
+    await expect(
+      readClaudeSubscriptionStatus({ execute }),
+    ).resolves.toMatchObject({
       connectionState: "error",
     });
   });

@@ -1,14 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
-import {
-  resolveExecutable,
-  withResolvedExecutablePaths,
-} from "./code-agent-runner.js";
-
 import type {
   SubscriptionStatus,
   SubscriptionTelemetry,
 } from "../../shared/subscription-status.js";
+import {
+  resolveExecutable,
+  withResolvedExecutablePaths,
+} from "./code-agent-runner.js";
 
 export const DEFAULT_CLAUDE_AUTH_STATUS_TIMEOUT_MS = 10_000;
 
