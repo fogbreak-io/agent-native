@@ -162,7 +162,7 @@ export function interpretClaudeAuthStatus(
       schemaVersion: 1,
       providerId: "claude",
       connectionState: "no-subscription",
-      authMethod,
+      ...(authMethod ? { authMethod } : {}),
       connectionMessage: isClaudeSubscriptionAuthMethod(authMethod)
         ? "Claude is signed in, but not with a Claude subscription plan Fogbreak can use."
         : "Claude Code is signed in with an API key or console login, not a Claude subscription.",
