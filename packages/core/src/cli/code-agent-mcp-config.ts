@@ -141,6 +141,20 @@ export function codexMcpConfigArgs(
         `mcp_servers.${key}.http_headers=${tomlInlineTable(server.headers)}`,
       );
     }
+    if (server.startupTimeoutSec !== undefined) {
+      args.push(
+        "-c",
+        `mcp_servers.${key}.startup_timeout_sec=${server.startupTimeoutSec}`,
+      );
+    }
+    // The CLI runs with `--ask-for-approval never`, so a tool that needs
+    // approval is refused instead of asked about.
+    if (server.approveTools) {
+      args.push(
+        "-c",
+        `mcp_servers.${key}.default_tools_approval_mode="approve"`,
+      );
+    }
   }
   return args;
 }
@@ -189,10 +203,55 @@ export function codeAgentMcpConfigurationErrors(
   );
 }
 
+interface CodexServerSettings {
+  startupTimeoutSec?: number;
+  approveTools?: boolean;
+}
+
+/**
+ * An MCP_SERVERS entry may carry Codex-only settings next to its url. A bad
+ * value is a configuration error, not something to drop silently.
+ */
+function codexServerSettings(
+  serverId: string,
+  server: McpServerConfig,
+): CodexServerSettings {
+  const { startupTimeoutSec, approveTools } = server as {
+    startupTimeoutSec?: unknown;
+    approveTools?: unknown;
+  };
+  if (
+    startupTimeoutSec !== undefined &&
+    !(
+      Number.isInteger(startupTimeoutSec) &&
+      (startupTimeoutSec as number) >= 1 &&
+      (startupTimeoutSec as number) <= 600
+    )
+  ) {
+    throw new Error(
+      `MCP server "${serverId}" startupTimeoutSec must be a whole number of seconds from 1 to 600.`,
+    );
+  }
+  if (approveTools !== undefined && typeof approveTools !== "boolean") {
+    throw new Error(`MCP server "${serverId}" approveTools must be a boolean.`);
+  }
+  return {
+    ...(startupTimeoutSec !== undefined
+      ? { startupTimeoutSec: startupTimeoutSec as number }
+      : {}),
+    ...(approveTools ? { approveTools } : {}),
+  };
+}
+
 function codeAgentHttpMcpServers(
   config: McpConfig | null,
   environment: NodeJS.ProcessEnv,
-): Array<[string, { url: string; headers?: Record<string, string> }]> {
+): Array<
+  [
+    string,
+    { url: string; headers?: Record<string, string> } & CodexServerSettings,
+  ]
+> {
   const servers =
     restrictCodeAgentMcpConfig(
       mergeCodeAgentMcpConfig(config, environment),
@@ -219,6 +278,15 @@ function codeAgentHttpMcpServers(
       );
     }
     idsByKey.set(key, serverId);
-    return [[key, { url: server.url, headers: server.headers }]];
+    return [
+      [
+        key,
+        {
+          url: server.url,
+          headers: server.headers,
+          ...codexServerSettings(serverId, server),
+        },
+      ],
+    ];
   });
 }
