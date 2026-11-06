@@ -97,6 +97,8 @@ export function desktopLocalRuntimeStatusLabel(
       return "Couldn't check";
     case "not-subscription":
       return "API key only";
+    case "no-plan":
+      return "No plan";
     case "needs-sign-in":
       return "Sign in";
     case "signed-in":
@@ -118,6 +120,8 @@ export function describeClaudeCodeProblem(
       return "Claude Code is installed but not signed in.";
     case "not-subscription":
       return "Claude Code is signed in with an API key, not a Claude subscription.";
+    case "no-plan":
+      return "Claude is signed in, but no usable subscription plan was reported.";
     case "unreadable":
       return "Fogbreak couldn't tell whether Claude Code is signed in.";
     case "not-installed":
@@ -598,9 +602,7 @@ function createSessionView(
           ? input.metadata.permissionMode
           : defaultPermissionMode;
         const created = await window.electronAPI.codeAgents.createRun({
-          prompt: appContext
-            ? `${appContextPrefix(appContext)}${prompt}`
-            : prompt,
+          prompt: appContext ? `${appContextPrefix(appContext)}${prompt}` : prompt,
           engine:
             DESKTOP_LOCAL_AGENT_ENGINE_BY_ID[
               runtime.id.replace("desktop-local-", "") as DesktopLocalAgentId

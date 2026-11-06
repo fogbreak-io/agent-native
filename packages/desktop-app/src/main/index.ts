@@ -205,7 +205,8 @@ import {
 } from "./browser-control/native-host";
 import {
   claudeCliModelOptions,
-  classifyLocalClaudeCli,
+  probeLocalClaudeCli,
+  probeLocalClaudeCliAsync,
 } from "./claude-subscription.js";
 import {
   CLI_STATUS_TTL_MS,
@@ -12044,7 +12045,6 @@ interface LocalClaudeCliStatus {
   /** Why an installed CLI cannot run; absent when the CLI is not installed. */
   runtimeState?: CodeAgentRuntimeState;
   label: string;
-  version?: string;
   error?: string;
 }
 
@@ -12055,40 +12055,20 @@ function getLocalClaudeCliStatus(
 ): LocalClaudeCliStatus {
   return cachedCliStatus(
     localClaudeCliStatusCache,
-    () => {
-      const version = runCliSync("claude", ["--version"]);
-      if (version.error) return parseLocalClaudeCliStatus(version, null);
-      return parseLocalClaudeCliStatus(
-        version,
-        runCliSync("claude", ["auth", "status", "--json"]),
-      );
-    },
-    async () => {
-      const version = await runCliAsync("claude", ["--version"]);
-      if (version.error) return parseLocalClaudeCliStatus(version, null);
-      return parseLocalClaudeCliStatus(
-        version,
-        await runCliAsync("claude", ["auth", "status", "--json"]),
-      );
-    },
+    () => ({
+      ...probeLocalClaudeCli((args) => runCliSync("claude", [...args])),
+      label: "Claude subscription",
+    }),
+    async () => ({
+      ...(await probeLocalClaudeCliAsync((args) =>
+        runCliAsync("claude", [...args]),
+      )),
+      label: "Claude subscription",
+    }),
     Date.now,
     CLI_STATUS_TTL_MS,
     options,
   );
-}
-
-function parseLocalClaudeCliStatus(
-  versionResult: CliRun,
-  statusResult: CliRun | null,
-): LocalClaudeCliStatus {
-  const probe = classifyLocalClaudeCli(versionResult, statusResult);
-  return {
-    ...probe,
-    label: probe.available ? "Claude subscription" : "Claude Code",
-    ...(probe.available && versionResult.error === undefined
-      ? { version: (versionResult.stdout || versionResult.stderr).trim() }
-      : {}),
-  };
 }
 
 interface LocalCliAvailability {

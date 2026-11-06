@@ -44,6 +44,7 @@ function claudeModels(
     | "signed-in"
     | "needs-sign-in"
     | "not-subscription"
+    | "no-plan"
     | "unreadable",
 ) {
   return [
@@ -129,10 +130,11 @@ describe("desktop app chat Claude Code state", () => {
 
   const text = (id: string) =>
     container.querySelector(`[data-testid="${id}"]`)?.textContent ?? "";
-  const signInButton = () =>
+  const buttonLabeled = (label: string) =>
     Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent === "Sign in to Claude",
+      (button) => button.textContent === label,
     );
+  const signInButton = () => buttonLabeled("Sign in to Claude");
 
   it("says why Claude cannot run and offers one sign-in button", async () => {
     await mountShell();
@@ -331,10 +333,79 @@ describe("desktop app chat Claude Code state", () => {
     });
     await settle();
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      "couldn't re-check the Claude sign-in",
-    );
+    expect(text("footer")).toContain("couldn't re-check the Claude sign-in");
     expect(text("footer")).not.toContain("Finish signing in");
+    expect(buttonLabeled("Try again")).toBeDefined();
+  });
+
+  it("stays retryable after a failed re-check and recovers to Claude", async () => {
+    await mountShell();
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    listModels.mockRejectedValueOnce(new Error("ipc failed"));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+    expect(text("footer")).toContain("couldn't re-check");
+    const refreshes = () =>
+      listModels.mock.calls.filter(([arg]) => arg?.refresh === true).length;
+    expect(refreshes()).toBe(1);
+
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(refreshes()).toBe(2);
+    expect(text("selected")).toBe("claude-code");
+    expect(text("footer")).toBe("");
+  });
+
+  it("recovers through the Try again button too", async () => {
+    await mountShell();
+    await act(async () => {
+      signInButton()!.click();
+    });
+    await settle();
+    listModels.mockRejectedValueOnce(new Error("ipc failed"));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+
+    await act(async () => {
+      buttonLabeled("Try again")!.click();
+    });
+    await settle();
+
+    expect(text("selected")).toBe("claude-code");
+  });
+
+  it("shows a signed-in claude.ai login the runner would reject as no plan, not as signed in", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("no-plan"),
+    });
+    await mountShell();
+
+    expect(text("footer")).toContain(
+      "Claude is signed in, but no usable subscription plan was reported.",
+    );
+    const claude = JSON.parse(text("agents")).find(
+      (agent: { id: string }) => agent.id === "claude-code",
+    );
+    expect(claude).toMatchObject({ configured: false, statusLabel: "No plan" });
   });
 
   it("clears 'Finish signing in' when the person is still signed out after coming back", async () => {

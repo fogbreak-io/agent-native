@@ -538,6 +538,7 @@ export type CodeAgentRuntimeState =
   | "signed-in"
   | "needs-sign-in"
   | "not-subscription"
+  | "no-plan"
   | "unreadable";
 
 export interface CodeAgentModelOption {

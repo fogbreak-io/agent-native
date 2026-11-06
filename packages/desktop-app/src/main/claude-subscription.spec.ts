@@ -7,7 +7,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_CLAUDE_AUTH_STATUS_TIMEOUT_MS,
   claudeCliModelOptions,
+  claudeRunnerAcceptsLogin,
   classifyLocalClaudeCli,
+  probeLocalClaudeCli,
+  probeLocalClaudeCliAsync,
   executeClaudeProcess,
   getClaudeSubscriptionLoginLaunchSpec,
   isClaudeSubscriptionStatus,
@@ -456,12 +459,50 @@ describe("classifyLocalClaudeCli", () => {
     },
     {
       name: "claude.ai login without subscriptionType",
-      run: statusRun(0, { loggedIn: true, authMethod: "claude.ai" }),
-      expected: { authenticated: true, runtimeState: "signed-in" },
+      run: statusRun(0, {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+      }),
+      expected: { authenticated: false, runtimeState: "no-plan" },
+    },
+    {
+      name: "claude.ai login with a blank subscriptionType",
+      run: statusRun(0, {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "  ",
+      }),
+      expected: { authenticated: false, runtimeState: "no-plan" },
+    },
+    {
+      name: "claude.ai login without apiProvider",
+      run: statusRun(0, {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        subscriptionType: "max",
+      }),
+      expected: { authenticated: false, runtimeState: "no-plan" },
+    },
+    {
+      name: "claude.ai login through a third-party apiProvider",
+      run: statusRun(0, {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "bedrock",
+        subscriptionType: "max",
+      }),
+      expected: { authenticated: false, runtimeState: "no-plan" },
     },
     {
       name: "API key",
-      run: statusRun(0, { loggedIn: true, authMethod: "api_key" }),
+      run: statusRun(0, {
+        loggedIn: true,
+        authMethod: "api_key",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+      }),
       expected: { authenticated: false, runtimeState: "not-subscription" },
     },
     {
@@ -535,4 +576,106 @@ describe("claudeCliModelOptions", () => {
       }
     },
   );
+});
+
+describe("claudeRunnerAcceptsLogin", () => {
+  // Pins the predicate mirrored from assertClaudeCodeSubscription in
+  // packages/core/src/cli/claude-code-participant.ts: change both together.
+  const ok = {
+    loggedIn: true,
+    authMethod: "claude.ai",
+    apiProvider: "firstParty",
+    subscriptionType: "pro",
+  };
+
+  it("accepts only a signed-in first-party claude.ai login with a plan", () => {
+    expect(claudeRunnerAcceptsLogin(ok)).toBe(true);
+    expect(claudeRunnerAcceptsLogin({ ...ok, loggedIn: false })).toBe(false);
+    expect(claudeRunnerAcceptsLogin({ ...ok, authMethod: "api_key" })).toBe(
+      false,
+    );
+    expect(claudeRunnerAcceptsLogin({ ...ok, authMethod: "claudeai" })).toBe(
+      false,
+    );
+    expect(claudeRunnerAcceptsLogin({ ...ok, apiProvider: "vertex" })).toBe(
+      false,
+    );
+    expect(claudeRunnerAcceptsLogin({ ...ok, apiProvider: undefined })).toBe(
+      false,
+    );
+    expect(claudeRunnerAcceptsLogin({ ...ok, subscriptionType: "" })).toBe(
+      false,
+    );
+    expect(claudeRunnerAcceptsLogin({ ...ok, subscriptionType: null })).toBe(
+      false,
+    );
+  });
+});
+
+describe("probeLocalClaudeCli", () => {
+  const ok = (stdout: string, status = 0): ClaudeCliProbeRun => ({
+    status,
+    stdout,
+    stderr: "",
+  });
+  const signedOut = JSON.stringify({ loggedIn: false, authMethod: "none" });
+  const signedIn = JSON.stringify({
+    loggedIn: true,
+    authMethod: "claude.ai",
+    apiProvider: "firstParty",
+    subscriptionType: "max",
+  });
+
+  it("runs --version, then auth status, and classifies the answer", () => {
+    const calls: string[][] = [];
+    const probe = probeLocalClaudeCli((args) => {
+      calls.push([...args]);
+      return args[0] === "--version"
+        ? ok("2.1.318 (Claude Code)")
+        : ok(signedOut, 1);
+    });
+
+    expect(calls).toEqual([["--version"], ["auth", "status", "--json"]]);
+    expect(probe).toMatchObject({
+      available: true,
+      authenticated: false,
+      runtimeState: "needs-sign-in",
+    });
+    // The model-list rows follow the real probe, not a fixed answer.
+    expect(
+      claudeCliModelOptions({
+        engine: "claude-cli",
+        supportedModels: ["claude-sonnet-5-5"],
+        probe,
+      })[0],
+    ).toMatchObject({ configured: false, runtimeState: "needs-sign-in" });
+  });
+
+  it("skips auth status when the CLI cannot run", () => {
+    const calls: string[][] = [];
+    const probe = probeLocalClaudeCli((args) => {
+      calls.push([...args]);
+      return {
+        status: null,
+        stdout: "",
+        stderr: "",
+        error: { code: "ENOENT", message: "spawn claude ENOENT" },
+      };
+    });
+
+    expect(calls).toEqual([["--version"]]);
+    expect(probe.available).toBe(false);
+  });
+
+  it("gives the same answer through the async runner", async () => {
+    const probe = await probeLocalClaudeCliAsync(async (args) =>
+      args[0] === "--version" ? ok("2.1.318") : ok(signedIn),
+    );
+
+    expect(probe).toMatchObject({
+      available: true,
+      authenticated: true,
+      runtimeState: "signed-in",
+    });
+  });
 });

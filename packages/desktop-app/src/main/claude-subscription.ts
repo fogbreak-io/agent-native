@@ -220,21 +220,74 @@ export function classifyLocalClaudeCli(
     stderr: status.stderr,
     ...(status.error?.code ? { spawnErrorCode: status.error.code } : {}),
   });
-  if (isClaudeSubscriptionStatus(connection)) {
-    return { available: true, authenticated: true, runtimeState: "signed-in" };
+  if (connection.connectionState === "connected") {
+    const raw = parseAuthStatus(status.stdout);
+    if (raw && claudeRunnerAcceptsLogin(raw)) {
+      return {
+        available: true,
+        authenticated: true,
+        runtimeState: "signed-in",
+      };
+    }
+    return {
+      available: true,
+      authenticated: false,
+      runtimeState: isClaudeSubscriptionAuthMethod(connection.authMethod)
+        ? "no-plan"
+        : "not-subscription",
+      error: "Claude Code is not signed in with a Claude subscription.",
+    };
   }
-  const runtimeState: CodeAgentRuntimeState =
-    connection.connectionState === "needs-sign-in"
-      ? "needs-sign-in"
-      : connection.connectionState === "connected"
-        ? "not-subscription"
-        : "unreadable";
   return {
     available: true,
     authenticated: false,
-    runtimeState,
+    runtimeState:
+      connection.connectionState === "needs-sign-in"
+        ? "needs-sign-in"
+        : "unreadable",
     error: "Claude Code is not signed in with a Claude subscription.",
   };
+}
+
+/**
+ * Probes the local CLI with `--version`, then `auth status --json` (skipped when
+ * the CLI cannot run). The runner is injected so the whole chain is testable.
+ */
+export function probeLocalClaudeCli(
+  run: (args: readonly string[]) => ClaudeCliProbeRun,
+): LocalClaudeCliProbe {
+  const version = run(["--version"]);
+  return classifyLocalClaudeCli(
+    version,
+    version.error ? null : run(CLAUDE_AUTH_STATUS_ARGS),
+  );
+}
+
+export async function probeLocalClaudeCliAsync(
+  run: (args: readonly string[]) => Promise<ClaudeCliProbeRun>,
+): Promise<LocalClaudeCliProbe> {
+  const version = await run(["--version"]);
+  return classifyLocalClaudeCli(
+    version,
+    version.error ? null : await run(CLAUDE_AUTH_STATUS_ARGS),
+  );
+}
+
+/**
+ * The login the code-agent runner accepts before a run. Mirrors
+ * `assertClaudeCodeSubscription` in packages/core/src/cli/claude-code-participant.ts
+ * (not exported there); `claude-subscription.spec.ts` pins the same cases.
+ * "Signed in" in the picker must imply a run will start.
+ */
+export function claudeRunnerAcceptsLogin(
+  raw: Record<string, unknown>,
+): boolean {
+  return (
+    raw.loggedIn === true &&
+    raw.authMethod === "claude.ai" &&
+    raw.apiProvider === "firstParty" &&
+    Boolean(stringValue(raw.subscriptionType))
+  );
 }
 
 /** The model-list rows for the local Claude CLI; an uninstalled CLI has none. */
