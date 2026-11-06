@@ -568,7 +568,7 @@ describe("song studio readiness ping", () => {
       songStudioUrl: SONG_URL,
       fetchImpl: fetchImpl as never,
     });
-    const init = fetchImpl.mock.calls[1][1] as RequestInit;
+    const init = fetchImpl.mock.calls[1]?.[1] as RequestInit;
     const headers = init.headers as Record<string, string>;
     expect(Object.keys(headers).sort()).toEqual([
       "Accept",

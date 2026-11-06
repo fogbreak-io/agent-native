@@ -224,7 +224,7 @@ describe("preparing a run's MCP environment", () => {
       SONG_STUDIO_WAITING_MESSAGE,
       notice.message,
     ]);
-    expect(events[1].metadata).toMatchObject({
+    expect(events[1]?.metadata).toMatchObject({
       serverId: "desktop_app_song_studio",
       reason: "timed-out",
     });
