@@ -890,7 +890,7 @@ class RemoteCodeAgentConnector {
   }
 
   private async postJson(pathname: string, body: unknown): Promise<unknown> {
-    const url = new URL(pathname, this.relayUrl);
+    const url = relayEndpointUrl(this.relayUrl, pathname);
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -1117,6 +1117,14 @@ function remoteExecutionCapabilities(): RemoteExecutionCapabilities {
       ? { engines: [...new Set(configured)].slice(0, 32) }
       : {}),
   };
+}
+
+// A relay can be mounted under a base path (https://fogbreak.io/dispatch);
+// `new URL("/x", base)` would drop it.
+function relayEndpointUrl(relayUrl: string, pathname: string): URL {
+  const url = new URL(relayUrl);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}${pathname}`;
+  return url;
 }
 
 function normalizeRelayUrl(value: string | undefined): string | null {
