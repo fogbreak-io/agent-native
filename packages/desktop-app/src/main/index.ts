@@ -353,6 +353,7 @@ import {
 } from "./quick-prompt";
 import {
   RemoteConnectorSupervisor,
+  chooseRelaySession,
   createRemoteConnectorProfileHandlers,
   normalizeRemoteRelayUrl,
   type ConnectorChild,
@@ -2663,15 +2664,19 @@ const remoteConnectors = new RemoteConnectorSupervisor({
   prepareComputer: () => ensureDesktopComputerMcpBridge(),
   computerEnv: (runId) => remoteConnectorComputerEnv(runId),
   revokeComputer: (runId) => revokeDesktopComputerRun(runId),
-  relayFetch: (profile, url, request) =>
-    (profile === "fogbreak"
-      ? session.fromPartition(FOGBREAK_SESSION_PARTITION)
-      : findRemoteRelaySession(url)
+  relayFetch: (profile, url, request) => {
+    const choice = chooseRelaySession(profile, url);
+    if (choice.kind === "refused") throw new Error(choice.reason);
+    return (
+      choice.kind === "partition"
+        ? session.fromPartition(choice.partition)
+        : findRemoteRelaySession(url)
     ).fetch(url, {
       ...request,
       credentials: "include",
       redirect: "manual",
-    }),
+    });
+  },
   deviceFetch: (url, request) => fetch(url, { ...request, redirect: "manual" }),
   persistEnabled: (profile, enabled) => {
     if (profile === "headtrip")

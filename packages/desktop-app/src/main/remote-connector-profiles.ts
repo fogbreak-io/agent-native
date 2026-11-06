@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { FOGBREAK_SESSION_PARTITION } from "../../shared/fogbreak";
 import type {
   CodeAgentRemoteConnectorStatus,
   RemoteConnectorConfigProblem,
@@ -23,6 +24,77 @@ const SAFE_LOG_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 export const REMOTE_CONNECTOR_PROFILE_IDS = ["headtrip", "fogbreak"] as const;
 
 export const FOGBREAK_REMOTE_RELAY_URL = "https://fogbreak.io/dispatch";
+
+const FOGBREAK_APEX_HOST = "fogbreak.io";
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function relayHostname(relayUrl: string): string | undefined {
+  try {
+    return new URL(relayUrl).hostname.toLowerCase().replace(/\.$/, "");
+    // coercion-ok: an unparseable URL has no host; callers treat that as not matching.
+  } catch {
+    return undefined;
+  }
+}
+
+/** True for fogbreak.io and any subdomain, whatever the scheme, port or path. */
+export function isFogbreakRelayUrl(relayUrl: string): boolean {
+  const host = relayHostname(relayUrl);
+  return (
+    host !== undefined &&
+    (host === FOGBREAK_APEX_HOST || host.endsWith(`.${FOGBREAK_APEX_HOST}`))
+  );
+}
+
+/** Pairing sends a session cookie, so only https (or a loopback relay) is allowed. */
+export function isPairableRelayUrl(relayUrl: string): boolean {
+  try {
+    const url = new URL(relayUrl);
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+    // coercion-ok: an unparseable URL is not pairable.
+  } catch {
+    return false;
+  }
+}
+
+export type RelaySessionChoice =
+  | { kind: "partition"; partition: string }
+  | { kind: "relay-session" }
+  | { kind: "refused"; reason: string };
+
+/**
+ * Which Electron session carries the pairing cookie. The Fogbreak profile only
+ * ever uses the Fogbreak partition, and only toward a Fogbreak https origin;
+ * any other profile never reaches the Fogbreak partition or a Fogbreak host.
+ */
+export function chooseRelaySession(
+  profile: RemoteConnectorProfileId,
+  url: string,
+): RelaySessionChoice {
+  const fogbreakHost = isFogbreakRelayUrl(url);
+  if (profile === "fogbreak") {
+    let secure = false;
+    try {
+      secure = new URL(url).protocol === "https:";
+      // coercion-ok: an unparseable URL is refused below.
+    } catch {
+      secure = false;
+    }
+    return fogbreakHost && secure
+      ? { kind: "partition", partition: FOGBREAK_SESSION_PARTITION }
+      : {
+          kind: "refused",
+          reason: "The Fogbreak profile only talks to a Fogbreak https relay.",
+        };
+  }
+  return fogbreakHost
+    ? {
+        kind: "refused",
+        reason: "Pair the Fogbreak relay from its own row.",
+      }
+    : { kind: "relay-session" };
+}
 
 export function parseRemoteConnectorProfileId(
   value: unknown,
@@ -823,11 +895,18 @@ export class RemoteConnectorSupervisor {
         "Enter a valid Agent-Native app URL to pair remote control.",
       );
     }
-    if (id === "headtrip" && relayUrl === FOGBREAK_REMOTE_RELAY_URL) {
+    if (id === "headtrip" && isFogbreakRelayUrl(relayUrl)) {
       return this.pairFailure(
         id,
         "use-profile-channel",
         "Pair the Fogbreak relay from its own row.",
+      );
+    }
+    if (!isPairableRelayUrl(relayUrl)) {
+      return this.pairFailure(
+        id,
+        "invalid-relay-url",
+        "Pairing needs an https relay URL (http is only allowed for localhost).",
       );
     }
     const existing = readRemoteDeviceConfig(profile, this.deps.io);

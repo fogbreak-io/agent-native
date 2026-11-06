@@ -4,11 +4,15 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { FOGBREAK_SESSION_PARTITION } from "../../shared/fogbreak";
 import {
   FOGBREAK_REMOTE_RELAY_URL,
   RemoteConnectorSupervisor,
   buildConnectorSpawn,
+  chooseRelaySession,
   createRemoteConnectorProfileHandlers,
+  isFogbreakRelayUrl,
+  isPairableRelayUrl,
   parseProfileRequest,
   parseRemoteConnectorProfileId,
   readRemoteDeviceConfig,
@@ -502,15 +506,101 @@ describe("pairing the fogbreak relay", () => {
     expect(h.supervisor.status("headtrip").state).toBe("disabled");
   });
 
-  it("rejects the fogbreak relay through the original pair path", async () => {
+  it.each([
+    "https://fogbreak.io/dispatch/",
+    "https://fogbreak.io",
+    "https://fogbreak.io/",
+    "http://fogbreak.io/dispatch",
+    "https://fogbreak.io/some/other/path",
+    "https://fogbreak.io:8443/dispatch",
+    "https://FOGBREAK.IO/dispatch",
+    "https://fogbreak.io./dispatch",
+    "https://www.fogbreak.io",
+    "https://app.staging.fogbreak.io/dispatch",
+    "http://beta.fogbreak.io/x",
+  ])(
+    "rejects the fogbreak relay %s through the original pair path",
+    async (relayUrl) => {
+      const h = createHarness();
+      h.seedHeadtrip();
+      const result = await h.supervisor.pair("headtrip", { relayUrl });
+      expect(result).toMatchObject({
+        ok: false,
+        reason: "use-profile-channel",
+      });
+      expect(h.calls.relay).toHaveLength(0);
+      expect(h.io.ops.filter((o) => o.op !== "read")).toEqual([]);
+    },
+  );
+
+  it("does not mistake look-alike hosts for fogbreak", () => {
+    for (const url of [
+      "https://notfogbreak.io/dispatch",
+      "https://fogbreak.io.evil.example/dispatch",
+      "https://fogbreak.com/dispatch",
+      "https://evil.example/fogbreak.io",
+    ]) {
+      expect(isFogbreakRelayUrl(url)).toBe(false);
+    }
+    expect(isFogbreakRelayUrl("https://fogbreak.io")).toBe(true);
+    expect(isFogbreakRelayUrl("https://a.b.fogbreak.io")).toBe(true);
+  });
+
+  it.each([
+    "http://relay.example.com",
+    "http://headtrip.dev-ae8.workers.dev",
+    "http://192.168.1.20:8100",
+    "http://localhost.evil.example",
+  ])("refuses to pair over plain http to %s", async (relayUrl) => {
     const h = createHarness();
     h.seedHeadtrip();
-    const result = await h.supervisor.pair("headtrip", {
-      relayUrl: "https://fogbreak.io/dispatch/",
-    });
-    expect(result).toMatchObject({ ok: false, reason: "use-profile-channel" });
+    const result = await h.supervisor.pair("headtrip", { relayUrl });
+    expect(result).toMatchObject({ ok: false, reason: "invalid-relay-url" });
     expect(h.calls.relay).toHaveLength(0);
     expect(h.io.ops.filter((o) => o.op !== "read")).toEqual([]);
+  });
+
+  it.each([
+    "http://localhost:8100",
+    "http://127.0.0.1:8100/dispatch",
+    "http://[::1]:8100",
+    "https://relay.example.com",
+  ])("still pairs %s", async (relayUrl) => {
+    const h = createHarness({
+      relayHandler: async () =>
+        response({ device: { id: "dev-ok-1" }, token: HEADTRIP_TOKEN }),
+    });
+    const result = await h.supervisor.pair("headtrip", { relayUrl });
+    expect(result.ok).toBe(true);
+    expect(h.calls.relay).toHaveLength(1);
+  });
+
+  it("recognises only https or loopback relays as pairable", () => {
+    expect(isPairableRelayUrl("https://relay.example.com")).toBe(true);
+    expect(isPairableRelayUrl("http://localhost:3000")).toBe(true);
+    expect(isPairableRelayUrl("http://127.0.0.1")).toBe(true);
+    expect(isPairableRelayUrl("http://[::1]:1")).toBe(true);
+    expect(isPairableRelayUrl("http://relay.example.com")).toBe(false);
+    expect(isPairableRelayUrl("ftp://relay.example.com")).toBe(false);
+    expect(isPairableRelayUrl("not a url")).toBe(false);
+  });
+
+  it("does not tighten reading an existing pairing over http", () => {
+    const io = new MemoryIo();
+    io.seed(HEADTRIP_FILE, {
+      token: HEADTRIP_TOKEN,
+      relayUrl: "http://relay.example.com",
+    });
+    const read = readRemoteDeviceConfig(
+      resolveRemoteConnectorProfile("headtrip", {
+        homeDir: HOME,
+        codeAgentsHome: CODE_AGENTS_HOME,
+      }),
+      io,
+    );
+    expect(read.kind).toBe("ok");
+    if (read.kind === "ok")
+      expect(read.relayUrl).toBe("http://relay.example.com/");
   });
 
   it("keeps the original pair flow for headtrip", async () => {
@@ -537,6 +627,66 @@ describe("pairing the fogbreak relay", () => {
       profile: "headtrip",
       enabled: true,
     });
+  });
+});
+
+describe("which session carries the pairing cookie", () => {
+  it("gives the fogbreak profile only the fogbreak partition", () => {
+    expect(chooseRelaySession("fogbreak", FOGBREAK_REMOTE_RELAY_URL)).toEqual({
+      kind: "partition",
+      partition: FOGBREAK_SESSION_PARTITION,
+    });
+    expect(
+      chooseRelaySession(
+        "fogbreak",
+        "https://fogbreak.io/dispatch/_agent-native/integrations/remote/register",
+      ),
+    ).toEqual({ kind: "partition", partition: FOGBREAK_SESSION_PARTITION });
+  });
+
+  it.each([
+    "https://evil.example/dispatch",
+    "https://fogbreak.io.evil.example/dispatch",
+    "http://fogbreak.io/dispatch",
+    "https://headtrip.dev-ae8.workers.dev",
+    "not a url",
+  ])("refuses the fogbreak profile toward %s", (url) => {
+    expect(chooseRelaySession("fogbreak", url).kind).toBe("refused");
+  });
+
+  it("never gives another profile the fogbreak partition or a fogbreak host", () => {
+    expect(
+      chooseRelaySession("headtrip", "https://headtrip.dev-ae8.workers.dev"),
+    ).toEqual({ kind: "relay-session" });
+    for (const url of [
+      FOGBREAK_REMOTE_RELAY_URL,
+      "https://fogbreak.io",
+      "http://www.fogbreak.io/x",
+    ]) {
+      expect(chooseRelaySession("headtrip", url).kind).toBe("refused");
+    }
+  });
+
+  it("hands the relay request to the session the choice names", async () => {
+    const asked: Array<{ profile: string; url: string }> = [];
+    const h = createHarness({
+      relayHandler: async (profile, url) => {
+        asked.push({ profile, url });
+        return response({ device: { id: "dev-fog-1" }, token: FOGBREAK_TOKEN });
+      },
+    });
+    h.seedHeadtrip();
+    await h.supervisor.pair("fogbreak", {});
+    expect(asked).toEqual([
+      {
+        profile: "fogbreak",
+        url: "https://fogbreak.io/dispatch/_agent-native/integrations/remote/register",
+      },
+    ]);
+    expect(
+      chooseRelaySession(nth(asked, 0).profile as "fogbreak", nth(asked, 0).url)
+        .kind,
+    ).toBe("partition");
   });
 });
 
@@ -1147,7 +1297,6 @@ describe("registering against a local fake relay", () => {
   interface Seen {
     method: string | undefined;
     url: string | undefined;
-    cookie: string | undefined;
     contentType: string | undefined;
     body: string;
   }
@@ -1175,7 +1324,6 @@ describe("registering against a local fake relay", () => {
         const entry: Seen = {
           method: req.method,
           url: req.url,
-          cookie: req.headers.cookie,
           contentType: req.headers["content-type"],
           body: Buffer.concat(chunks).toString("utf-8"),
         };
@@ -1198,7 +1346,7 @@ describe("registering against a local fake relay", () => {
         const target = new URL(url);
         const res = await fetch(`http://127.0.0.1:${port}${target.pathname}`, {
           method: request.method,
-          headers: { ...request.headers, cookie: COOKIE },
+          headers: { ...request.headers },
           body: request.body,
           redirect: "manual",
         });
@@ -1229,7 +1377,6 @@ describe("registering against a local fake relay", () => {
     expect(nth(relay.seen, 0)).toMatchObject({
       method: "POST",
       url: "/dispatch/_agent-native/integrations/remote/register",
-      cookie: COOKIE,
       contentType: "application/json",
     });
     expect(JSON.parse(nth(relay.seen, 0).body)).toEqual({
