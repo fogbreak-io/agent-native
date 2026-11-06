@@ -61,3 +61,10 @@ CLOUD MAC BUILD: NOT STARTED, depends on the final head. Facts: .github/workflow
 - PR #3 (dual relay) https://github.com/fogbreak-io/agent-native/pull/3 head 761ff686663737ca210b4ebe15c3a5ac49a99206 (stacked on bb71b5a0; 2 commits: d32cba16 desktop supervisor, 761ff686 core base-path fix with changeset). Independent review running (a2862f88a6d89bb41), no APPROVE yet. UNPROVEN: real pairing against fogbreak.io, iPhone Sessions listing, real connector, cookie acceptance on /remote/register.
 - Control Room PR #1 merged (7730081); follow-up .panel[hidden] at e9d3af10 on claude/orch8-desktop-control-room-hidden (no PR).
 - Cloudflare closed by #8 via Mac MCP. Cloud Mac build cancelled by #8 (built on MacBook).
+
+## Dual relay review 2026-11-06 ~09:3xZ
+PR #3 head 761ff686663737ca210b4ebe15c3a5ac49a99206: Verdict: APPROVE at 761ff686663737ca210b4ebe15c3a5ac49a99206 (reviewer a2862f88a6d89bb41). Stacked on PR #2 (merge #2 first). UNPROVEN: real fogbreak.io pairing + cookie acceptance, iPhone Sessions listing, real connector. Mac steps: sign in to Fogbreak in the app > Settings > Workspace > Fogbreak relay > Pair > expect 'Polling · fogbreak.io' > check iPhone Sessions tab; the connector must be switched on each launch.
+
+| STOP RECEIPT | OBJECTIVE | STATE | EVIDENCE | OWNER | NEXT |
+|---|---|---|---|---|---|
+| STOP RECEIPT | Desktop lead packet: Cloudflare route, Control Room live, Claude panel, dual relay | Cloudflare CLOSED by #8 (Mac MCP); Control Room PR #1 MERGED; Claude panel PR #2 APPROVE at bb71b5a0; dual relay PR #3 APPROVE at 761ff686; follow-up e9d3af10 (.panel[hidden]) unmerged, no PR | PRs https://github.com/fogbreak-io/agent-native/pull/1 /2 /3; this log | orchestrator #8 | merge #2 then #3; build on MacBook; capture real-app steps; real signed-out Claude run and real fogbreak.io pairing remain UNPROVEN |
