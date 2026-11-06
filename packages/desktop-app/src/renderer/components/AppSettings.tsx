@@ -189,6 +189,36 @@ function remoteStatusCopy(status: CodeAgentRemoteConnectorStatus | null): {
   };
 }
 
+function fogbreakRelayLabel(
+  status: RemoteConnectorProfileStatus | null,
+): string {
+  if (!status) return "Checking";
+  if (status.config === "absent") return "Not paired";
+  if (status.config === "unreadable") return "Needs repair";
+  switch (status.state) {
+    case "running":
+      return "Polling";
+    case "starting":
+      return "Connecting";
+    case "error":
+      return "Error";
+    case "disabled":
+      return "Off";
+    case "stopped":
+    case "unconfigured":
+      return "Offline";
+  }
+}
+
+function fogbreakPairFailureCopy(
+  result: RemoteConnectorProfileResult,
+): string | null {
+  if (result.reason === "signed-out") {
+    return "Sign in to Fogbreak in this app, then pair again.";
+  }
+  return result.error ?? null;
+}
+
 function updateStatusCopy(status: UpdateStatus | null): {
   label: string;
   description: string;
@@ -529,6 +559,10 @@ export default function AppSettings({
   const [remotePairing, setRemotePairing] = useState(false);
   const [showRemotePairing, setShowRemotePairing] = useState(false);
   const [remoteMessage, setRemoteMessage] = useState<string | null>(null);
+  const [fogbreakRelay, setFogbreakRelay] =
+    useState<RemoteConnectorProfileStatus | null>(null);
+  const [fogbreakBusy, setFogbreakBusy] = useState(false);
+  const [fogbreakMessage, setFogbreakMessage] = useState<string | null>(null);
   const [providerSettings, setProviderSettings] =
     useState<CodeAgentProviderSettings | null>(null);
   const [providerLoadMessage, setProviderLoadMessage] = useState<string | null>(
@@ -695,6 +729,8 @@ export default function AppSettings({
     if (!api?.getRemoteConnectorStatus) return;
     try {
       const status = await api.getRemoteConnectorStatus();
+      const fogbreak = await api.getRemoteConnectorProfileStatus("fogbreak");
+      if (fogbreak.status) setFogbreakRelay(fogbreak.status);
       setRemoteStatus(status);
       setRemoteMessage(null);
       setRemotePairUrl(
@@ -788,6 +824,28 @@ export default function AppSettings({
       setRemotePairing(false);
     }
   }, [remotePairUrl, remoteWorkspacePath]);
+
+  const runFogbreakRelay = useCallback(
+    async (
+      action: (
+        api: Window["electronAPI"]["codeAgents"],
+      ) => Promise<RemoteConnectorProfileResult>,
+    ) => {
+      if (fogbreakBusy) return;
+      setFogbreakBusy(true);
+      setFogbreakMessage(null);
+      try {
+        const result = await action(window.electronAPI.codeAgents);
+        if (result.status) setFogbreakRelay(result.status);
+        setFogbreakMessage(result.ok ? null : fogbreakPairFailureCopy(result));
+      } catch (err) {
+        setFogbreakMessage(err instanceof Error ? err.message : String(err));
+      } finally {
+        setFogbreakBusy(false);
+      }
+    },
+    [fogbreakBusy],
+  );
 
   const shortcutRegistrations = useMemo(() => {
     const map = new Map<string, DesktopShortcutRegistration>();
@@ -1133,6 +1191,91 @@ export default function AppSettings({
                   </div>
                 ) : null}
               </div>
+            </SettingsRow>
+            <SettingsRow
+              label="Fogbreak relay"
+              status={
+                <span className="text-xs text-muted-foreground">
+                  {fogbreakRelayLabel(fogbreakRelay)}
+                  {fogbreakRelay?.relayHost
+                    ? ` · ${fogbreakRelay.relayHost}`
+                    : ""}
+                </span>
+              }
+              control={
+                fogbreakRelay?.config === "configured" ? (
+                  <Switch
+                    checked={fogbreakRelay.enabled}
+                    disabled={fogbreakBusy}
+                    onCheckedChange={(enabled) =>
+                      void runFogbreakRelay((api) =>
+                        api.setRemoteConnectorProfileEnabled(
+                          "fogbreak",
+                          enabled,
+                        ),
+                      )
+                    }
+                    aria-label={
+                      fogbreakRelay.enabled
+                        ? "Turn Fogbreak relay off"
+                        : "Turn Fogbreak relay on"
+                    }
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn--primary"
+                    disabled={fogbreakBusy || !fogbreakRelay}
+                    onClick={() =>
+                      void runFogbreakRelay((api) =>
+                        api.pairRemoteConnectorProfile("fogbreak", {
+                          repair: fogbreakRelay?.config === "unreadable",
+                        }),
+                      )
+                    }
+                  >
+                    {fogbreakBusy
+                      ? "Pairing…"
+                      : fogbreakRelay?.config === "unreadable"
+                        ? "Repair"
+                        : "Pair"}
+                  </button>
+                )
+              }
+            >
+              {fogbreakMessage || fogbreakRelay?.error ? (
+                <div className="text-xs text-muted-foreground" role="status">
+                  {fogbreakMessage ?? fogbreakRelay?.error}
+                </div>
+              ) : null}
+              {fogbreakRelay?.config === "configured" ? (
+                <div className="mt-2 flex gap-4">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                    disabled={fogbreakBusy || !fogbreakRelay.enabled}
+                    onClick={() =>
+                      void runFogbreakRelay((api) =>
+                        api.restartRemoteConnectorProfile("fogbreak"),
+                      )
+                    }
+                  >
+                    Restart
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                    disabled={fogbreakBusy}
+                    onClick={() =>
+                      void runFogbreakRelay((api) =>
+                        api.unpairRemoteConnectorProfile("fogbreak"),
+                      )
+                    }
+                  >
+                    Unpair
+                  </button>
+                </div>
+              ) : null}
             </SettingsRow>
           </SettingsGroup>
 

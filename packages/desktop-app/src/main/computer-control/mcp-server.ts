@@ -35,6 +35,7 @@ import type {
 } from "./types";
 
 const COMPUTER_MCP_PATH = "/mcp";
+const REMOTE_CONNECTOR_RUN_ID = "__remote_connector__";
 const DEFAULT_LEASE_TTL_MS = 15 * 60 * 1_000;
 
 function stringifyBrowserInput(value: unknown): string {
@@ -171,9 +172,16 @@ export class DesktopComputerMcpBridge {
     return { url: this.url, bearerToken };
   }
 
-  registerConnector(): DesktopComputerMcpRegistration {
+  registerConnector(
+    runId: string = REMOTE_CONNECTOR_RUN_ID,
+  ): DesktopComputerMcpRegistration {
     if (!this.url) throw new Error("Desktop computer MCP bridge is not ready.");
-    const runId = "__remote_connector__";
+    if (
+      runId !== REMOTE_CONNECTOR_RUN_ID &&
+      !runId.startsWith(`${REMOTE_CONNECTOR_RUN_ID}:`)
+    ) {
+      throw new Error("A connector run id must be a remote connector id.");
+    }
     for (const previous of this.removeCredentials(runId)) {
       void this.stopBrowserContext(previous);
     }

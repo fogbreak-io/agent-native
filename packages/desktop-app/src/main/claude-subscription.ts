@@ -12,6 +12,12 @@ import {
 
 export { isClaudeSubscriptionAuthMethod };
 import {
+  CLI_STATUS_TTL_MS,
+  cachedCliStatus,
+  invalidateCliStatusCache,
+  type CliStatusCache,
+} from "./cli-status-cache.js";
+import {
   resolveExecutable,
   withResolvedExecutablePaths,
 } from "./code-agent-runner.js";
@@ -289,6 +295,47 @@ export async function readLocalClaudeCliStatusAsync(
     ...(await probeLocalClaudeCliAsync(run)),
     label: "Claude subscription",
   };
+}
+
+export interface LocalClaudeCliRunners {
+  sync: (args: readonly string[]) => ClaudeCliProbeRun;
+  async: (args: readonly string[]) => Promise<ClaudeCliProbeRun>;
+}
+
+/** The status Electron main serves from its cache: first read probes synchronously, later reads refresh in the background. */
+export function cachedLocalClaudeCliStatus(
+  cache: CliStatusCache<LocalClaudeCliStatus>,
+  runners: LocalClaudeCliRunners,
+): LocalClaudeCliStatus {
+  return cachedCliStatus(
+    cache,
+    () => readLocalClaudeCliStatus(runners.sync),
+    () => readLocalClaudeCliStatusAsync(runners.async),
+    Date.now,
+    CLI_STATUS_TTL_MS,
+  );
+}
+
+/**
+ * Status for a caller that must see the CLI as it is now. `cachedCliStatus`
+ * answers a refresh with the previous value while the re-probe runs, which is
+ * the stale read a person gets right after signing in in Terminal, so a
+ * refresh drops the cached value and waits for a fresh probe.
+ */
+export async function readLocalClaudeCliStatusFresh(
+  cache: CliStatusCache<LocalClaudeCliStatus>,
+  runners: LocalClaudeCliRunners,
+  options: { refresh?: boolean } = {},
+): Promise<LocalClaudeCliStatus> {
+  if (!options.refresh) return cachedLocalClaudeCliStatus(cache, runners);
+  invalidateCliStatusCache(cache);
+  const generation = cache.generation;
+  const status = await readLocalClaudeCliStatusAsync(runners.async);
+  if (cache.generation === generation) {
+    cache.value = status;
+    cache.probedAt = Date.now();
+  }
+  return status;
 }
 
 /**

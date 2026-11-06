@@ -256,6 +256,8 @@ describe("desktop app chat Claude Code state", () => {
       (agent: { id: string }) => agent.id === "claude-code",
     );
     expect(claude.statusLabel).toBe("Couldn't check");
+    expect(buttonLabeled("Try again")).toBeDefined();
+    expect(signInButton()).toBeUndefined();
   });
 
   it("reports a failed model probe instead of marking every runtime not installed", async () => {
@@ -408,7 +410,7 @@ describe("desktop app chat Claude Code state", () => {
     expect(claude).toMatchObject({ configured: false, statusLabel: "No plan" });
   });
 
-  it("clears 'Finish signing in' when the person is still signed out after coming back", async () => {
+  it("says Claude is not signed in yet after a stale first look, and keeps looking", async () => {
     await mountShell();
     await act(async () => {
       signInButton()!.click();
@@ -422,8 +424,39 @@ describe("desktop app chat Claude Code state", () => {
     await settle();
 
     expect(text("footer")).not.toContain("Finish signing in");
-    expect(text("footer")).toContain("not signed in");
+    expect(text("footer")).toContain("Claude isn't signed in yet.");
     expect(signInButton()).toBeDefined();
+
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("selected")).toBe("claude-code");
+    expect(text("footer")).toBe("");
+  });
+
+  it("clears the 'isn't installed' message on the next look instead of keeping it", async () => {
+    listModels.mockResolvedValue({ status: "ok", models: codexModels });
+    await mountShell();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-claude-row"]')!
+        .click();
+    });
+    await settle();
+    expect(text("footer")).toContain("isn't installed");
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("footer")).toBe("");
   });
 
   it("does not override an explicit Codex pick when Claude signs in", async () => {
