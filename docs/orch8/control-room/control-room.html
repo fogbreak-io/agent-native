@@ -285,6 +285,7 @@ dd.bad { color: var(--bad); }
       case "blocked_by_policy": msg = "Your organization's policy blocks Claude Code Remote for this page."; break;
       case "capability_disabled":
       case "capability_removed": msg = "This view cannot run the connector feature."; break;
+      case "user_changed": msg = "The account signed in here is no longer the one that opened this page. Reload the page."; break;
       case "server_unavailable": msg = "Claude Code Remote did not answer. This is usually temporary, and the page asks again on the next poll."; break;
       default: msg = raw;
     }
