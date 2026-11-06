@@ -22,6 +22,8 @@ export interface ClaudeProcessResult {
   stdout: string;
   stderr: string;
   timedOut?: boolean;
+  /** errno code (ENOENT for a missing CLI) when the child could not be started. */
+  spawnErrorCode?: string;
 }
 
 export interface ClaudeProcessExecutorOptions {
@@ -94,10 +96,45 @@ export async function readClaudeSubscriptionStatus(
       stderr: "",
     }),
   );
-  if (result.timedOut || result.exitCode !== 0) return unavailableStatus();
+  return interpretClaudeAuthStatus(result);
+}
 
-  const raw = parseAuthStatus(result.stdout);
-  if (!raw || typeof raw.loggedIn !== "boolean") return unavailableStatus();
+/**
+ * Turns one `claude auth status --json` run into a connection status. The CLI
+ * exits 1 when signed out and still prints `{"loggedIn": false}`, so the exit
+ * code alone cannot tell "signed out" from "could not run".
+ */
+export function interpretClaudeAuthStatus(
+  result: ClaudeProcessResult,
+): SubscriptionStatus {
+  if (result.spawnErrorCode === "ENOENT") {
+    return connectionOnlyStatus(
+      "unavailable",
+      "Claude Code was not found on this computer.",
+    );
+  }
+  if (result.timedOut) {
+    return connectionOnlyStatus(
+      "error",
+      "Claude Code did not answer when asked whether it is signed in.",
+    );
+  }
+  if (result.exitCode === null) {
+    return connectionOnlyStatus(
+      "error",
+      "Fogbreak could not run Claude Code to check its sign-in.",
+    );
+  }
+  const raw =
+    result.exitCode === 0 || result.exitCode === 1
+      ? parseAuthStatus(result.stdout)
+      : null;
+  if (!raw || typeof raw.loggedIn !== "boolean") {
+    return connectionOnlyStatus(
+      "error",
+      "Claude Code answered, but its sign-in state could not be read.",
+    );
+  }
   const authMethod = stringValue(raw.authMethod);
   if (!raw.loggedIn) {
     return {
@@ -180,11 +217,15 @@ export function getClaudeSubscriptionLoginLaunchSpec(
   };
 }
 
-function unavailableStatus(): SubscriptionStatus {
+function connectionOnlyStatus(
+  connectionState: "unavailable" | "error",
+  connectionMessage: string,
+): SubscriptionStatus {
   return {
     schemaVersion: 1,
     providerId: "claude",
-    connectionState: "unavailable",
+    connectionState,
+    connectionMessage,
     telemetry: connectionOnlyTelemetry(false),
   };
 }
@@ -310,8 +351,16 @@ export function executeClaudeProcess(
       child.stderr?.on("error", () => {
         stop({ exitCode: null, stdout, stderr, timedOut });
       });
-      child.on("error", () => {
-        stop({ exitCode: null, stdout, stderr, timedOut });
+      child.on("error", (error: NodeJS.ErrnoException) => {
+        stop({
+          exitCode: null,
+          stdout,
+          stderr,
+          timedOut,
+          ...(typeof error.code === "string"
+            ? { spawnErrorCode: error.code }
+            : {}),
+        });
       });
       child.once("close", (exitCode) => {
         finish(failure ?? { exitCode, stdout, stderr, timedOut });
