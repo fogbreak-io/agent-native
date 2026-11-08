@@ -128,6 +128,15 @@ export const IPC = {
   CODE_AGENTS_REMOTE_CONNECTOR_SET_ENABLED:
     "code-agents:remote-connector:set-enabled",
   CODE_AGENTS_REMOTE_CONNECTOR_PAIR: "code-agents:remote-connector:pair",
+  CODE_AGENTS_REMOTE_PROFILE_GET_STATUS:
+    "code-agents:remote-connector:profile:get-status",
+  CODE_AGENTS_REMOTE_PROFILE_SET_ENABLED:
+    "code-agents:remote-connector:profile:set-enabled",
+  CODE_AGENTS_REMOTE_PROFILE_PAIR: "code-agents:remote-connector:profile:pair",
+  CODE_AGENTS_REMOTE_PROFILE_RESTART:
+    "code-agents:remote-connector:profile:restart",
+  CODE_AGENTS_REMOTE_PROFILE_UNPAIR:
+    "code-agents:remote-connector:profile:unpair",
   CODE_AGENTS_PROVIDER_SETTINGS_GET: "code-agents:provider-settings:get",
   CODE_AGENTS_PROVIDER_SETTINGS_UPDATE: "code-agents:provider-settings:update",
   CODE_AGENTS_BUILDER_STATUS_GET: "code-agents:builder-status:get",
@@ -937,6 +946,88 @@ export interface CodeAgentRemoteConnectorPairResult {
   deviceId?: string;
   message?: string;
   error?: string;
+}
+
+/**
+ * One paired relay per profile. `headtrip` is the original pairing
+ * (~/.agent-native/remote-device.json); `fogbreak` is the Fogbreak relay.
+ * The renderer names a profile; main owns every path and URL.
+ */
+export type RemoteConnectorProfileId = "headtrip" | "fogbreak";
+
+export type RemoteConnectorProfileState =
+  | "disabled"
+  | "unconfigured"
+  | "starting"
+  | "running"
+  | "stopped"
+  | "error";
+
+/** `absent` means no pairing file; `unreadable` means one exists but cannot be used. */
+export type RemoteConnectorConfigStatus =
+  | "absent"
+  | "configured"
+  | "unreadable";
+
+export type RemoteConnectorConfigProblem =
+  | "io-error"
+  | "invalid-json"
+  | "invalid-shape"
+  | "missing-token"
+  | "missing-relay-url"
+  | "relay-mismatch";
+
+export type RemoteConnectorErrorReason =
+  | "config-unreadable"
+  | "computer-bridge-unavailable"
+  | "spawn-failed"
+  | "pairing-failed"
+  | "settings-save-failed";
+
+export interface RemoteConnectorProfileStatus {
+  profile: RemoteConnectorProfileId;
+  state: RemoteConnectorProfileState;
+  enabled: boolean;
+  config: RemoteConnectorConfigStatus;
+  configProblem?: RemoteConnectorConfigProblem | undefined;
+  relayUrl?: string | undefined;
+  relayHost?: string | undefined;
+  deviceId?: string | undefined;
+  pid?: number | undefined;
+  startedAt?: string | undefined;
+  lastExitAt?: string | undefined;
+  lastExitCode?: number | null | undefined;
+  lastExitSignal?: string | null | undefined;
+  restartCount: number;
+  nextRestartAt?: string | undefined;
+  errorReason?: RemoteConnectorErrorReason | undefined;
+  error?: string | undefined;
+}
+
+export type RemoteConnectorProfileFailure =
+  | "invalid-request"
+  | "invalid-profile"
+  | "profile-protected"
+  | "invalid-relay-url"
+  | "signed-out"
+  | "relay-rejected"
+  | "relay-invalid-response"
+  | "relay-unreachable"
+  | "no-token"
+  | "write-failed"
+  | "config-unreadable"
+  | "disabled"
+  | "use-profile-channel";
+
+export interface RemoteConnectorProfileResult {
+  ok: boolean;
+  status?: RemoteConnectorProfileStatus | undefined;
+  reason?: RemoteConnectorProfileFailure | undefined;
+  error?: string | undefined;
+  message?: string | undefined;
+  deviceId?: string | undefined;
+  /** Unpair only: whether the relay also revoked the device. */
+  remoteRevoked?: boolean | undefined;
 }
 
 export type CodeAgentProviderId =

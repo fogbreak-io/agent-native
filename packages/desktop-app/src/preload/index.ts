@@ -58,6 +58,8 @@ import {
   type CodeAgentRemoteConnectorPairRequest,
   type CodeAgentRemoteConnectorPairResult,
   type CodeAgentRemoteConnectorStatus,
+  type RemoteConnectorProfileId,
+  type RemoteConnectorProfileResult,
   type CodeAgentProviderSettings,
   type CodeAgentProviderSettingsUpdate,
   type CodeAgentProviderSettingsUpdateResult,
@@ -547,6 +549,36 @@ const electronAPI = {
       request?: CodeAgentRemoteConnectorPairRequest,
     ): Promise<CodeAgentRemoteConnectorPairResult> =>
       ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_CONNECTOR_PAIR, request),
+    getRemoteConnectorProfileStatus: (
+      profile: RemoteConnectorProfileId,
+    ): Promise<RemoteConnectorProfileResult> =>
+      ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_PROFILE_GET_STATUS, {
+        profile,
+      }),
+    setRemoteConnectorProfileEnabled: (
+      profile: RemoteConnectorProfileId,
+      enabled: boolean,
+    ): Promise<RemoteConnectorProfileResult> =>
+      ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_PROFILE_SET_ENABLED, {
+        profile,
+        enabled,
+      }),
+    pairRemoteConnectorProfile: (
+      profile: RemoteConnectorProfileId,
+      options?: { repair?: boolean },
+    ): Promise<RemoteConnectorProfileResult> =>
+      ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_PROFILE_PAIR, {
+        profile,
+        repair: options?.repair === true,
+      }),
+    restartRemoteConnectorProfile: (
+      profile: RemoteConnectorProfileId,
+    ): Promise<RemoteConnectorProfileResult> =>
+      ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_PROFILE_RESTART, { profile }),
+    unpairRemoteConnectorProfile: (
+      profile: RemoteConnectorProfileId,
+    ): Promise<RemoteConnectorProfileResult> =>
+      ipcRenderer.invoke(IPC.CODE_AGENTS_REMOTE_PROFILE_UNPAIR, { profile }),
     getProviderSettings: (): Promise<CodeAgentProviderSettings> =>
       ipcRenderer.invoke(IPC.CODE_AGENTS_PROVIDER_SETTINGS_GET),
     updateProviderSettings: (

@@ -144,6 +144,78 @@ type CodeAgentRemoteConnectorPairResult = {
   error?: string;
 };
 
+type RemoteConnectorProfileId = "headtrip" | "fogbreak";
+
+type RemoteConnectorProfileState =
+  | "disabled"
+  | "unconfigured"
+  | "starting"
+  | "running"
+  | "stopped"
+  | "error";
+
+type RemoteConnectorConfigStatus = "absent" | "configured" | "unreadable";
+
+type RemoteConnectorConfigProblem =
+  | "io-error"
+  | "invalid-json"
+  | "invalid-shape"
+  | "missing-token"
+  | "missing-relay-url"
+  | "relay-mismatch";
+
+type RemoteConnectorErrorReason =
+  | "config-unreadable"
+  | "computer-bridge-unavailable"
+  | "spawn-failed"
+  | "pairing-failed"
+  | "settings-save-failed";
+
+type RemoteConnectorProfileStatus = {
+  profile: RemoteConnectorProfileId;
+  state: RemoteConnectorProfileState;
+  enabled: boolean;
+  config: RemoteConnectorConfigStatus;
+  configProblem?: RemoteConnectorConfigProblem | undefined;
+  relayUrl?: string | undefined;
+  relayHost?: string | undefined;
+  deviceId?: string | undefined;
+  pid?: number | undefined;
+  startedAt?: string | undefined;
+  lastExitAt?: string | undefined;
+  lastExitCode?: number | null | undefined;
+  lastExitSignal?: string | null | undefined;
+  restartCount: number;
+  nextRestartAt?: string | undefined;
+  errorReason?: RemoteConnectorErrorReason | undefined;
+  error?: string | undefined;
+};
+
+type RemoteConnectorProfileFailure =
+  | "invalid-request"
+  | "invalid-profile"
+  | "profile-protected"
+  | "invalid-relay-url"
+  | "signed-out"
+  | "relay-rejected"
+  | "relay-invalid-response"
+  | "relay-unreachable"
+  | "no-token"
+  | "write-failed"
+  | "config-unreadable"
+  | "disabled"
+  | "use-profile-channel";
+
+type RemoteConnectorProfileResult = {
+  ok: boolean;
+  status?: RemoteConnectorProfileStatus | undefined;
+  reason?: RemoteConnectorProfileFailure | undefined;
+  error?: string | undefined;
+  message?: string | undefined;
+  deviceId?: string | undefined;
+  remoteRevoked?: boolean | undefined;
+};
+
 type CodeAgentProviderId =
   | "builder"
   | "anthropic"
@@ -1095,6 +1167,23 @@ interface ElectronAPI {
     pairRemoteConnector(
       request?: CodeAgentRemoteConnectorPairRequest,
     ): Promise<CodeAgentRemoteConnectorPairResult>;
+    getRemoteConnectorProfileStatus(
+      profile: RemoteConnectorProfileId,
+    ): Promise<RemoteConnectorProfileResult>;
+    setRemoteConnectorProfileEnabled(
+      profile: RemoteConnectorProfileId,
+      enabled: boolean,
+    ): Promise<RemoteConnectorProfileResult>;
+    pairRemoteConnectorProfile(
+      profile: RemoteConnectorProfileId,
+      options?: { repair?: boolean },
+    ): Promise<RemoteConnectorProfileResult>;
+    restartRemoteConnectorProfile(
+      profile: RemoteConnectorProfileId,
+    ): Promise<RemoteConnectorProfileResult>;
+    unpairRemoteConnectorProfile(
+      profile: RemoteConnectorProfileId,
+    ): Promise<RemoteConnectorProfileResult>;
     getProviderSettings(): Promise<CodeAgentProviderSettings>;
     updateProviderSettings(
       request: CodeAgentProviderSettingsUpdate,

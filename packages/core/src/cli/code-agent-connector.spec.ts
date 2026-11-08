@@ -170,4 +170,55 @@ describe("runCodeAgentConnector", () => {
       "/_agent-native/integrations/remote/run-events",
     ]);
   });
+  it.each([
+    ["https://relay.test", "/_agent-native/integrations/remote/poll"],
+    ["https://relay.test/", "/_agent-native/integrations/remote/poll"],
+    [
+      "https://relay.test/dispatch",
+      "/dispatch/_agent-native/integrations/remote/poll",
+    ],
+    [
+      "https://relay.test/dispatch/",
+      "/dispatch/_agent-native/integrations/remote/poll",
+    ],
+  ])("polls %s at %s", async (relayUrl, expectedPath) => {
+    const root = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), "agent-native-connector-base-path-"),
+    );
+    tempRoots.push(root);
+    const configPath = path.join(root, "remote-device.json");
+    await fs.promises.writeFile(
+      configPath,
+      JSON.stringify({
+        token: "test-token",
+        deviceId: "device-test",
+        deviceName: "Base path test device",
+        relayUrl,
+        workspacePath: root,
+      }),
+    );
+    process.env.AGENT_NATIVE_CODE_AGENTS_HOME = path.join(root, "store");
+    process.env.AGENT_NATIVE_REMOTE_DEVICE_PATH = configPath;
+    const requested: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(new URL(String(input)).pathname);
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({}),
+        } as Response;
+      }),
+    );
+    const output = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    });
+
+    await runCodeAgentConnector({ output, once: true });
+
+    expect(requested[0]).toBe(expectedPath);
+  });
 });
