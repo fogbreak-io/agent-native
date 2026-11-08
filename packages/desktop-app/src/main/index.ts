@@ -3870,7 +3870,7 @@ function findRemoteRelaySession(relayUrl: string): Electron.Session {
       (appConfig) => getAppOrigin(appConfig) === origin,
     );
     if (matchingApp)
-      return session.fromPartition(`persist:app-${matchingApp.id}`);
+      return session.fromPartition(desktopAppSessionPartition(matchingApp));
   } catch (err) {
     console.warn("[remote-code-agent] failed to match relay app:", err);
   }
@@ -5943,7 +5943,8 @@ async function desktopCodeAgentMcpEnvironment(
     if (!baseUrl) continue;
     const serverId = desktopCodeAgentMcpServerId(appConfig.id);
     const appMcpUrl = desktopAppMcpUrl(baseUrl);
-    const appSession = session.fromPartition(`persist:app-${appConfig.id}`);
+    // Same partition the app's webview signs in to (hosted Fogbreak apps share one).
+    const appSession = session.fromPartition(desktopAppSessionPartition(appConfig));
     const cookieHeader = await cookieHeaderForRelay(appSession, appMcpUrl);
     if (appConfig.id === "song-studio") {
       // Song Studio's MCP wants the connection entry from its own connect route,
