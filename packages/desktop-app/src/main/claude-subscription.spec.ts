@@ -12,7 +12,9 @@ import {
   classifyLocalClaudeCli,
   probeLocalClaudeCli,
   probeLocalClaudeCliAsync,
+  cachedLocalClaudeCliStatus,
   readLocalClaudeCliStatus,
+  readLocalClaudeCliStatusFresh,
   readLocalClaudeCliStatusAsync,
   executeClaudeProcess,
   getClaudeSubscriptionLoginLaunchSpec,
@@ -21,6 +23,7 @@ import {
   type ClaudeCliProbeRun,
   type ClaudeProcessExecutor,
 } from "./claude-subscription.js";
+import { createCliStatusCache } from "./cli-status-cache.js";
 
 describe("readClaudeSubscriptionStatus", () => {
   it("maps Claude Code subscription authentication into a provider-neutral connection status", async () => {
@@ -868,5 +871,76 @@ describe("local Claude status as Electron main caches and lists it", () => {
       configured: true,
       statusLabel: "Claude subscription",
     });
+  });
+});
+
+describe("local Claude status after signing in in Terminal", () => {
+  // Real cache and real status reader; only the CLI runs are injected.
+  function setup() {
+    const world = { signedIn: false, probes: 0 };
+    const answer = (args: readonly string[]): ClaudeCliProbeRun => {
+      if (args[0] === "--version") {
+        return { status: 0, stdout: "2.1.318", stderr: "" };
+      }
+      world.probes += 1;
+      return world.signedIn
+        ? {
+            status: 0,
+            stdout: JSON.stringify({
+              loggedIn: true,
+              authMethod: "claude.ai",
+              apiProvider: "firstParty",
+              subscriptionType: "max",
+            }),
+            stderr: "",
+          }
+        : {
+            status: 1,
+            stdout: JSON.stringify({ loggedIn: false }),
+            stderr: "",
+          };
+    };
+    return {
+      world,
+      cache:
+        createCliStatusCache<ReturnType<typeof readLocalClaudeCliStatus>>(),
+      runners: {
+        sync: answer,
+        async: async (args: readonly string[]) => answer(args),
+      },
+    };
+  }
+
+  it("answers a refresh with the fresh status, not the cached signed-out one", async () => {
+    const { world, cache, runners } = setup();
+    expect(cachedLocalClaudeCliStatus(cache, runners).authenticated).toBe(
+      false,
+    );
+    world.signedIn = true;
+
+    expect(cachedLocalClaudeCliStatus(cache, runners).authenticated).toBe(
+      false,
+    );
+    expect(
+      (await readLocalClaudeCliStatusFresh(cache, runners)).authenticated,
+    ).toBe(false);
+
+    const fresh = await readLocalClaudeCliStatusFresh(cache, runners, {
+      refresh: true,
+    });
+
+    expect(fresh).toMatchObject({
+      authenticated: true,
+      runtimeState: "signed-in",
+    });
+    expect(cachedLocalClaudeCliStatus(cache, runners).authenticated).toBe(true);
+  });
+
+  it("does not re-probe on a plain read", async () => {
+    const { world, cache, runners } = setup();
+    await readLocalClaudeCliStatusFresh(cache, runners);
+    await readLocalClaudeCliStatusFresh(cache, runners);
+
+    expect(world.probes).toBe(1);
   });
 });

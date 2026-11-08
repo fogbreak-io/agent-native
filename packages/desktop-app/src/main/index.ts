@@ -204,9 +204,9 @@ import {
   parseAdditionalChromeExtensionIds,
 } from "./browser-control/native-host";
 import {
+  cachedLocalClaudeCliStatus,
   claudeCliModelOptions,
-  readLocalClaudeCliStatus,
-  readLocalClaudeCliStatusAsync,
+  readLocalClaudeCliStatusFresh,
   type LocalClaudeCliStatus,
 } from "./claude-subscription.js";
 import {
@@ -5948,7 +5948,7 @@ async function desktopCodeAgentMcpEnvironment(
     const cookieHeader = await cookieHeaderForRelay(appSession, appMcpUrl);
     if (appConfig.id === "song-studio") {
       // Song Studio's MCP wants the connection entry from its own connect route,
-      // not the browser cookie. Fall back to the cookie if it cannot be minted.
+      // not the browser cookie. If it cannot be minted, Song gets no entry.
       await ensureSongStudioLocalSession();
       const songCookies = await cookieHeaderForRelay(appSession, baseUrl);
       const entry = await mintSongStudioMcpEntry(songCookies, baseUrl);
@@ -5961,6 +5961,11 @@ async function desktopCodeAgentMcpEnvironment(
         appIds.push(appConfig.id);
         continue;
       }
+      // Song Studio's MCP does not accept the browser session cookie
+      // (song-studio-local-session.ts), so a cookie entry would be a dead
+      // server. Skip it; the next code-agent start mints again.
+      console.warn("[code-agent-mcp] Song Studio MCP entry not minted; skipping");
+      continue;
     } else if (!cookieHeader) {
       // A hosted fogbreak.io app with no login has no tools to offer.
       continue;
@@ -12043,19 +12048,15 @@ function readConfiguredCodexModel(): string | undefined {
 
 const localClaudeCliStatusCache = createCliStatusCache<LocalClaudeCliStatus>();
 
-function getLocalClaudeCliStatus(
-  options?: CliStatusReadOptions,
-): LocalClaudeCliStatus {
-  return cachedCliStatus(
+const localClaudeCliRunners = {
+  sync: (args: readonly string[]) => runCliSync("claude", [...args]),
+  async: (args: readonly string[]) => runCliAsync("claude", [...args]),
+};
+
+function getLocalClaudeCliStatus(): LocalClaudeCliStatus {
+  return cachedLocalClaudeCliStatus(
     localClaudeCliStatusCache,
-    () => readLocalClaudeCliStatus((args) => runCliSync("claude", [...args])),
-    () =>
-      readLocalClaudeCliStatusAsync((args) =>
-        runCliAsync("claude", [...args]),
-      ),
-    Date.now,
-    CLI_STATUS_TTL_MS,
-    options,
+    localClaudeCliRunners,
   );
 }
 
@@ -12272,7 +12273,11 @@ async function getCodeAgentModelList(
     const builderConfigured = Boolean(
       providerStatusById(settings, "builder")?.configured,
     );
-    const claude = getLocalClaudeCliStatus(cliStatusOptions);
+    const claude = await readLocalClaudeCliStatusFresh(
+      localClaudeCliStatusCache,
+      localClaudeCliRunners,
+      cliStatusOptions,
+    );
     logLocalCodeAgentRuntimes(claude, codex);
     const pi = getLocalCliAvailability(
       "pi",

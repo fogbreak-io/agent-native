@@ -161,6 +161,12 @@ function hasSignedInClaude(models: readonly CodeAgentModelOption[]): boolean {
   );
 }
 
+function hasClaudeCli(models: readonly CodeAgentModelOption[]): boolean {
+  return models.some(
+    (model) => model.engine === DESKTOP_LOCAL_AGENT_ENGINE_BY_ID["claude-code"],
+  );
+}
+
 type LocalCodeChangeState =
   | { status: "idle" }
   | { status: "starting"; message?: string }
@@ -447,8 +453,18 @@ export default function DesktopAppChatShell({
       if (result.status !== "ok") {
         setClaudeSignIn({ status: "recheck-failed" });
       } else if (!hasSignedInClaude(result.models)) {
-        // Still signed out: drop "Finish signing in…" and offer the button again.
-        setClaudeSignIn({ status: "idle" });
+        // Still signed out: say so, and keep looking when the person returns
+        // while a sign-in is under way. Anything else (a launch failure, a
+        // missing CLI, a plain Try again) has nothing left to wait for.
+        const signInUnderWay = hasClaudeCli(result.models);
+        setClaudeSignIn((current) =>
+          signInUnderWay &&
+          (current.status === "opened" ||
+            current.status === "not-yet" ||
+            current.status === "recheck-failed")
+            ? { status: "not-yet" }
+            : { status: "idle" },
+        );
       }
     } catch {
       setLocalAgentModelsFailed(true);
@@ -461,7 +477,9 @@ export default function DesktopAppChatShell({
   useEffect(() => {
     if (
       claudeSignIn.status !== "opened" &&
-      claudeSignIn.status !== "recheck-failed"
+      claudeSignIn.status !== "not-yet" &&
+      claudeSignIn.status !== "recheck-failed" &&
+      claudeSignIn.status !== "failed"
     ) {
       return;
     }
@@ -850,7 +868,9 @@ export default function DesktopAppChatShell({
                     signIn={claudeSignIn}
                     onSignIn={() => void startClaudeSignIn()}
                     onRetry={() => void recheckLocalAgents()}
-                    canRetry={localAgentModelsFailed}
+                    canRetry={
+                      localAgentModelsFailed || runtimeNotice?.canRetry === true
+                    }
                     retryBusy={rechecking}
                   />
                 ) : undefined

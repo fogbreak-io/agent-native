@@ -34,4 +34,11 @@ describe("code-agent MCP tools use the app's own signed-in session", () => {
       desktopAppSessionPartition({ id: "song-studio", url: "http://127.0.0.1:8100/song-studio", mode: "prod" } as never),
     ).toBe("persist:app-song-studio");
   });
+  it("never registers a cookie-only Song Studio server when the mint fails", () => {
+    const mcp = body("async function desktopCodeAgentMcpEnvironment");
+    const song = mcp.slice(mcp.indexOf('if (appConfig.id === "song-studio")'));
+    const branch = song.slice(0, song.indexOf("} else if (!cookieHeader)"));
+    expect(branch).toContain("Song Studio MCP entry not minted; skipping");
+    expect(branch.trimEnd().endsWith("continue;")).toBe(true);
+  });
 });
