@@ -84,6 +84,26 @@ export function pickDefaultDesktopLocalAgent(
   return undefined;
 }
 
+/**
+ * A bare saved "default" is not a choice: saved by an older build, it cannot be
+ * told from never having chosen, and must not pin the chat to the hosted
+ * default while a subscription runtime can run. Only this value records
+ * choosing the hosted default on purpose.
+ */
+const DESKTOP_AGENT_DEFAULT_PICKED = "default-picked";
+
+export function desktopAgentStorageValue(agent: string): string {
+  return agent === "default" ? DESKTOP_AGENT_DEFAULT_PICKED : agent;
+}
+
+/** The runtime the person chose for an app, or undefined when they never did. */
+export function desktopAgentFromStorage(
+  stored: string | null,
+): string | undefined {
+  if (!stored || stored === "default") return undefined;
+  return stored === DESKTOP_AGENT_DEFAULT_PICKED ? "default" : stored;
+}
+
 /** A runtime whose CLI is missing has no model options, so it has no probe state. */
 export type DesktopLocalRuntimeState = CodeAgentRuntimeState | "not-installed";
 
@@ -133,6 +153,8 @@ export interface DesktopLocalRuntimeNotice {
   message: string;
   /** Whether the sign-in button can help with this problem. */
   canSignIn: boolean;
+  /** Whether the problem is "could not check", so the right control is a re-check. */
+  canRetry: boolean;
 }
 
 /**
@@ -154,6 +176,7 @@ export function desktopLocalRuntimeNotice(input: {
       message:
         "Fogbreak couldn't check which local agents are installed or signed in.",
       canSignIn: false,
+      canRetry: true,
     };
   }
   const claude = input.agents.find((agent) => agent.id === "claude-code");
@@ -168,7 +191,12 @@ export function desktopLocalRuntimeNotice(input: {
       : input.selectedAgent === "claude-code"
         ? " Messages to Claude will fail until you sign in."
         : "";
-  return { message: `${problem}${using}`, canSignIn: true };
+  const unreadable = claude.runtimeState === "unreadable";
+  return {
+    message: `${problem}${using}`,
+    canSignIn: !unreadable,
+    canRetry: unreadable,
+  };
 }
 
 function modelForEngine(
@@ -602,7 +630,9 @@ function createSessionView(
           ? input.metadata.permissionMode
           : defaultPermissionMode;
         const created = await window.electronAPI.codeAgents.createRun({
-          prompt: appContext ? `${appContextPrefix(appContext)}${prompt}` : prompt,
+          prompt: appContext
+            ? `${appContextPrefix(appContext)}${prompt}`
+            : prompt,
           engine:
             DESKTOP_LOCAL_AGENT_ENGINE_BY_ID[
               runtime.id.replace("desktop-local-", "") as DesktopLocalAgentId

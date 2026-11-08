@@ -9,6 +9,8 @@ import DesktopAppChatShell from "./DesktopAppChatShell.js";
 type PanelProps = {
   selectedAgent: string;
   availableAgents: unknown[];
+  availableModels?: Array<{ engine: string; models: string[] }>;
+  onAgentChange: (agent: string) => void;
   composerSlot?: React.ReactNode;
   onConnectLocalRuntime: (agent: string) => void;
   children: React.ReactNode;
@@ -22,6 +24,19 @@ vi.mock("@agent-native/toolkit/app/chat", () => ({
     <div>
       <span data-testid="selected">{props.selectedAgent}</span>
       <pre data-testid="agents">{JSON.stringify(props.availableAgents)}</pre>
+      <span data-testid="model-catalog">
+        {props.availableModels === undefined
+          ? "server"
+          : props.availableModels.map((group) => group.engine).join(",")}
+      </span>
+      {["default", "codex", "claude-code"].map((agent) => (
+        <button
+          key={agent}
+          type="button"
+          data-testid={`pick-${agent}`}
+          onClick={() => props.onAgentChange(agent)}
+        />
+      ))}
       <button
         type="button"
         data-testid="pick-claude-row"
@@ -256,6 +271,8 @@ describe("desktop app chat Claude Code state", () => {
       (agent: { id: string }) => agent.id === "claude-code",
     );
     expect(claude.statusLabel).toBe("Couldn't check");
+    expect(buttonLabeled("Try again")).toBeDefined();
+    expect(signInButton()).toBeUndefined();
   });
 
   it("reports a failed model probe instead of marking every runtime not installed", async () => {
@@ -408,7 +425,7 @@ describe("desktop app chat Claude Code state", () => {
     expect(claude).toMatchObject({ configured: false, statusLabel: "No plan" });
   });
 
-  it("clears 'Finish signing in' when the person is still signed out after coming back", async () => {
+  it("says Claude is not signed in yet after a stale first look, and keeps looking", async () => {
     await mountShell();
     await act(async () => {
       signInButton()!.click();
@@ -422,8 +439,39 @@ describe("desktop app chat Claude Code state", () => {
     await settle();
 
     expect(text("footer")).not.toContain("Finish signing in");
-    expect(text("footer")).toContain("not signed in");
+    expect(text("footer")).toContain("Claude isn't signed in yet.");
     expect(signInButton()).toBeDefined();
+
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("selected")).toBe("claude-code");
+    expect(text("footer")).toBe("");
+  });
+
+  it("clears the 'isn't installed' message on the next look instead of keeping it", async () => {
+    listModels.mockResolvedValue({ status: "ok", models: codexModels });
+    await mountShell();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-claude-row"]')!
+        .click();
+    });
+    await settle();
+    expect(text("footer")).toContain("isn't installed");
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await settle();
+
+    expect(text("footer")).toBe("");
   });
 
   it("does not override an explicit Codex pick when Claude signs in", async () => {
@@ -514,5 +562,63 @@ describe("desktop app chat Claude Code state", () => {
       release({ status: "ok", models: claudeModels("needs-sign-in") });
     });
     await settle();
+  });
+
+  it("opens on the signed-in Claude when only a bare default was saved", async () => {
+    localStorage.setItem("desktop-app-agent:orchestrator", "default");
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await mountShell();
+
+    expect(text("selected")).toBe("claude-code");
+  });
+
+  it("keeps the hosted default the person picked, across a reopen", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: claudeModels("signed-in"),
+    });
+    await mountShell();
+    expect(text("selected")).toBe("claude-code");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-default"]')!
+        .click();
+    });
+    expect(text("selected")).toBe("default");
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await mountShell();
+
+    expect(text("selected")).toBe("default");
+  });
+
+  it("gives the hosted default the server's own model list, not local CLI engines", async () => {
+    listModels.mockResolvedValue({
+      status: "ok",
+      models: [...codexModels, ...claudeModels("signed-in")],
+    });
+    await mountShell();
+    expect(text("selected")).toBe("claude-code");
+    expect(text("model-catalog")).toBe("codex-cli,claude-cli");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-default"]')!
+        .click();
+    });
+    expect(text("selected")).toBe("default");
+    expect(text("model-catalog")).toBe("server");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="pick-claude-code"]')!
+        .click();
+    });
+    expect(text("model-catalog")).toBe("codex-cli,claude-cli");
   });
 });

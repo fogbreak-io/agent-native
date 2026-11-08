@@ -1,13 +1,19 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import type { McpConfig } from "../mcp-client/config.js";
+import { loadMcpConfig, type McpConfig } from "../mcp-client/config.js";
 import {
   claudeMcpConfig,
   codeAgentMcpConfigurationErrors,
+  codexMcpChildEnv,
   codexMcpConfigArgs,
   mergeCodeAgentMcpConfig,
   restrictCodeAgentMcpConfig,
 } from "./code-agent-mcp-config.js";
+import type { CodeAgentPermissionMode } from "./code-agent-runs.js";
 
 describe("code-agent MCP config", () => {
   it("accepts the full MCP_SERVERS shape", () => {
@@ -385,5 +391,183 @@ describe("code-agent MCP config", () => {
 
     expect(mergeCodeAgentMcpConfig(null, environment)).toBeNull();
     expect(codexMcpConfigArgs(null, environment)).toEqual([]);
+  });
+});
+
+describe("Codex settings carried by an MCP_SERVERS entry", () => {
+  const songEntry = {
+    type: "http",
+    url: "http://127.0.0.1:8100/song-studio/mcp",
+    headers: { Authorization: "Bearer fake-test-token" },
+    startupTimeoutSec: 90,
+    approveTools: true,
+  };
+  const envWith = (entry: Record<string, unknown>) =>
+    ({
+      MCP_SERVERS: JSON.stringify({
+        servers: { desktop_app_song_studio: entry },
+      }),
+    }) as NodeJS.ProcessEnv;
+
+  it("gives Codex the url, bearer header, a 90 s startup budget and tool approval", () => {
+    expect(
+      codexMcpConfigArgs(null, envWith(songEntry), {
+        permissionMode: "full-auto",
+      }),
+    ).toEqual([
+      "-c",
+      'mcp_servers.desktop_app_song_studio.url="http://127.0.0.1:8100/song-studio/mcp"',
+      "-c",
+      'mcp_servers.desktop_app_song_studio.bearer_token_env_var="AGENT_NATIVE_MCP_DESKTOP_APP_SONG_STUDIO_TOKEN"',
+      "-c",
+      "mcp_servers.desktop_app_song_studio.startup_timeout_sec=90",
+      "-c",
+      'mcp_servers.desktop_app_song_studio.default_tools_approval_mode="approve"',
+    ]);
+  });
+
+  it("keeps the bearer token out of argv and hands it over by variable name", () => {
+    const args = codexMcpConfigArgs(null, envWith(songEntry), {
+      permissionMode: "full-auto",
+    });
+    expect(JSON.stringify(args)).not.toContain("fake-test-token");
+    expect(args.join("\n")).not.toContain("http_headers");
+    expect(codexMcpChildEnv(null, envWith(songEntry))).toEqual({
+      AGENT_NATIVE_MCP_DESKTOP_APP_SONG_STUDIO_TOKEN: "fake-test-token",
+    });
+  });
+
+  it("moves only the bearer into the environment and keeps other headers", () => {
+    const env = envWith({
+      ...songEntry,
+      headers: { Authorization: "Bearer fake-test-token", "X-Trace": "t1" },
+    });
+    expect(codexMcpConfigArgs(null, env).join("\n")).toContain(
+      'mcp_servers.desktop_app_song_studio.http_headers={"X-Trace"="t1"}',
+    );
+  });
+
+  it("keeps an argv header for a server that did not arrive through MCP_SERVERS", () => {
+    const fileConfig: McpConfig = {
+      servers: {
+        repoServer: {
+          type: "http",
+          url: "https://repo.example/mcp",
+          headers: { Authorization: "Bearer repo-token" },
+        },
+      },
+    };
+    expect(codexMcpConfigArgs(fileConfig, {} as NodeJS.ProcessEnv)).toEqual([
+      "-c",
+      'mcp_servers.repoServer.url="https://repo.example/mcp"',
+      "-c",
+      'mcp_servers.repoServer.http_headers={"Authorization"="Bearer repo-token"}',
+    ]);
+    expect(codexMcpChildEnv(fileConfig, {} as NodeJS.ProcessEnv)).toEqual({});
+  });
+
+  it("never lets a repo's mcp.config.json grant itself approval or a startup budget", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-repo-config-"));
+    try {
+      fs.writeFileSync(
+        path.join(dir, "mcp.config.json"),
+        JSON.stringify({
+          servers: {
+            repoServer: {
+              type: "http",
+              url: "https://repo.example/mcp",
+              approveTools: true,
+              startupTimeoutSec: 600,
+            },
+          },
+        }),
+      );
+      const loaded = loadMcpConfig(dir);
+      expect(loaded?.servers.repoServer).toBeDefined();
+      const args = codexMcpConfigArgs(loaded, {} as NodeJS.ProcessEnv, {
+        permissionMode: "full-auto",
+      }).join("\n");
+      expect(args).toContain("mcp_servers.repoServer.url=");
+      expect(args).not.toContain("default_tools_approval_mode");
+      expect(args).not.toContain("startup_timeout_sec");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores those settings on a config entry even if one carries them in memory", () => {
+    const fileConfig = {
+      servers: {
+        repoServer: {
+          type: "http",
+          url: "https://repo.example/mcp",
+          approveTools: true,
+          startupTimeoutSec: 600,
+        },
+      },
+    } as unknown as McpConfig;
+    const args = codexMcpConfigArgs(fileConfig, {} as NodeJS.ProcessEnv, {
+      permissionMode: "full-auto",
+    }).join("\n");
+    expect(args).not.toContain("default_tools_approval_mode");
+    expect(args).not.toContain("startup_timeout_sec");
+  });
+
+  it("adds neither setting for an entry that does not ask for them", () => {
+    const { startupTimeoutSec, approveTools, ...plain } = songEntry;
+    void startupTimeoutSec;
+    void approveTools;
+    const args = codexMcpConfigArgs(null, envWith(plain)).join("\n");
+    expect(args).not.toContain("startup_timeout_sec");
+    expect(args).not.toContain("default_tools_approval_mode");
+  });
+
+  it("does not approve tools when the entry says false", () => {
+    expect(
+      codexMcpConfigArgs(null, envWith({ ...songEntry, approveTools: false }), {
+        permissionMode: "full-auto",
+      }).join("\n"),
+    ).not.toContain("default_tools_approval_mode");
+  });
+
+  it("approves only for the invocation's own write-capable mode", () => {
+    const approves = (permissionMode?: CodeAgentPermissionMode) =>
+      codexMcpConfigArgs(null, envWith(songEntry), { permissionMode }).some(
+        (arg) => arg.includes("default_tools_approval_mode"),
+      );
+    expect(approves("auto-edit")).toBe(true);
+    expect(approves("full-auto")).toBe(true);
+    expect(approves("read-only")).toBe(false);
+    expect(approves("ask-before-edit")).toBe(false);
+    expect(approves(undefined)).toBe(false);
+    // The startup budget is not a permission and is kept in every mode.
+    expect(
+      codexMcpConfigArgs(null, envWith(songEntry), {
+        permissionMode: "read-only",
+      }),
+    ).toContain("mcp_servers.desktop_app_song_studio.startup_timeout_sec=90");
+  });
+
+  it("rejects a bad setting loudly instead of dropping it", () => {
+    for (const startupTimeoutSec of [0, 601, 1.5, "90", null]) {
+      expect(() =>
+        codexMcpConfigArgs(null, envWith({ ...songEntry, startupTimeoutSec })),
+      ).toThrow(/startupTimeoutSec/);
+    }
+    expect(() =>
+      codexMcpConfigArgs(null, envWith({ ...songEntry, approveTools: "yes" })),
+    ).toThrow(/approveTools/);
+  });
+
+  it("keeps Codex-only settings out of Claude's config", () => {
+    expect(claudeMcpConfig(null, envWith(songEntry))).toEqual({
+      mcpServers: {
+        desktop_app_song_studio: {
+          type: "http",
+          url: "http://127.0.0.1:8100/song-studio/mcp",
+          headers: { Authorization: "Bearer fake-test-token" },
+        },
+      },
+    });
   });
 });

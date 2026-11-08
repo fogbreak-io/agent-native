@@ -79,6 +79,7 @@ import { createCodeAgentAgentTools } from "./code-agent-agent-tools.js";
 import {
   claudeMcpConfig,
   codeAgentMcpConfigurationErrors,
+  codexMcpChildEnv,
   codexMcpConfigArgs,
   mergeCodeAgentMcpConfig,
   restrictCodeAgentMcpConfig,
@@ -1616,7 +1617,9 @@ async function executeCodexCliRun(options: {
   const mcpPromptNotice = codeAgentMcpPromptNotice(mcpConfig);
   appendCodeAgentMcpConfigurationErrors(options.run.id, mcpConfig);
   const args = [
-    ...codexMcpConfigArgs(mcpConfig),
+    ...codexMcpConfigArgs(mcpConfig, process.env, {
+      permissionMode: options.permissionMode,
+    }),
     "--ask-for-approval",
     "never",
     "--sandbox",
@@ -1657,6 +1660,7 @@ async function executeCodexCliRun(options: {
   try {
     const result = await runCodexCliProcess({
       args,
+      env: codexMcpChildEnv(mcpConfig),
       cwd,
       prompt: buildCodexCliPrompt(
         options.run,
@@ -1805,6 +1809,7 @@ async function executeCodexCliRun(options: {
 
 function runCodexCliProcess(options: {
   args: string[];
+  env?: Record<string, string>;
   cwd: string;
   prompt: string;
   stdout?: NodeJS.WritableStream;
@@ -1820,7 +1825,7 @@ function runCodexCliProcess(options: {
     const child = spawn("codex", options.args, {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, ...options.env },
     });
     const finish = (
       result: Omit<CodexCliProcessResult, "stdout" | "stderr">,

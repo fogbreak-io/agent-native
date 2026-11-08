@@ -20,7 +20,6 @@ import {
   isDefaultDesktopTemplateDevTarget,
 } from "@shared/app-registry";
 import type { AppConfig, DesktopAppLaunchBehavior } from "@shared/app-registry";
-import { desktopRemoteMcpUnavailable } from "@shared/chat-first-mcp";
 import { requiresConfiguredCodeAgentProvider } from "@shared/code-agent-readiness";
 import {
   CODE_AGENTS_SURFACE_ID,
@@ -190,11 +189,6 @@ import {
   FOGBREAK_SONG_STUDIO_URL,
   desktopAppSessionPartition,
 } from "../../shared/fogbreak.js";
-import {
-  mintSongStudioMcpEntry,
-  signInSongStudioLocally,
-} from "./song-studio-local-session.js";
-import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import * as AppStore from "./app-store";
 import { isDesktopEnvironmentLanePreference } from "./app-store";
 import { BrowserControlLoopbackBridge } from "./browser-control/bridge";
@@ -204,9 +198,9 @@ import {
   parseAdditionalChromeExtensionIds,
 } from "./browser-control/native-host";
 import {
+  cachedLocalClaudeCliStatus,
   claudeCliModelOptions,
-  readLocalClaudeCliStatus,
-  readLocalClaudeCliStatusAsync,
+  readLocalClaudeCliStatusFresh,
   type LocalClaudeCliStatus,
 } from "./claude-subscription.js";
 import {
@@ -268,6 +262,7 @@ import { contentFilesWebviewDenialReason } from "./content-files-webview-access.
 import { deriveContentFilesRepositoryIdentity } from "./content-files/local-identity";
 import { readCookieHeaderForUrl } from "./cookie-header.js";
 import { DesktopDesignPreviewManager } from "./design-preview-manager";
+import type { DesktopMcpNotice } from "./desktop-app-mcp-servers.js";
 import { captureDesktopBrowserScreenshot } from "./desktop-browser-screenshot";
 import {
   DESKTOP_IDENTITY_PARTITION,
@@ -289,6 +284,12 @@ import {
   type DesktopNavigationShortcutInput,
   type DesktopNavigationShortcutSource,
 } from "./desktop-navigation-shortcuts.js";
+import {
+  prepareRunMcp,
+  releaseAbandonedRunStart,
+  resolveWorkspaceAppMcpServers,
+  type DesktopWorkspaceApp,
+} from "./desktop-run-mcp.js";
 import {
   desktopRequestedUserDataPath,
   initializeDesktopStartup,
@@ -356,8 +357,15 @@ import {
   installSentryWebContentsInstrumentation,
   setSentryWebContentsMetadata,
 } from "./sentry";
+import {
+  createSongStudioLocalSession,
+  prepareSongStudioMcp,
+  signInSongStudioLocally,
+  warmSongStudioMcp,
+} from "./song-studio-local-session.js";
 import { setMailWebviewBackgroundThrottling } from "./webview-background-throttling.js";
 import { installWebviewNavigationListeners } from "./webview-navigation";
+import { isAllowedWebviewPermission } from "./webview-permissions.js";
 import { installWindowDragController } from "./window-drag";
 import { loadDesktopWorkspaceApps } from "./workspace-apps.js";
 
@@ -5855,48 +5863,47 @@ async function resolveDesktopMcpHost(): Promise<{
   };
 }
 
-let songStudioLocalSignInAt = 0;
-let songStudioLocalSignInPending: Promise<void> | null = null;
-const SONG_STUDIO_LOCAL_SIGN_IN_TTL_MS = 10 * 60 * 1000;
+const songStudioPartition = () =>
+  session.fromPartition("persist:app-song-studio");
+
+const songStudioLog = (
+  message: string,
+  fields?: Record<string, string | number>,
+) => console.info(`[song-studio] ${message}`, fields ?? {});
+
+const songStudioLocalSession = createSongStudioLocalSession({
+  signIn: () => signInSongStudioLocally(songStudioPartition()),
+  warmUp: () =>
+    warmSongStudioMcp({
+      readCookies: () =>
+        cookieHeaderForRelay(songStudioPartition(), FOGBREAK_SONG_STUDIO_URL),
+      refreshCookies: async () => {
+        await songStudioLocalSession.ensure(true);
+        return cookieHeaderForRelay(
+          songStudioPartition(),
+          FOGBREAK_SONG_STUDIO_URL,
+        );
+      },
+      log: songStudioLog,
+    }),
+  log: songStudioLog,
+});
 
 function ensureSongStudioLocalSession(force = false): Promise<void> {
-  if (
-    !force &&
-    songStudioLocalSignInAt &&
-    Date.now() - songStudioLocalSignInAt < SONG_STUDIO_LOCAL_SIGN_IN_TTL_MS
-  ) {
-    return Promise.resolve();
-  }
-  if (songStudioLocalSignInPending) return songStudioLocalSignInPending;
-  songStudioLocalSignInPending = signInSongStudioLocally(
-    session.fromPartition("persist:app-song-studio"),
-  )
-    .then((result) => {
-      if (result.ok) {
-        songStudioLocalSignInAt = Date.now();
-        console.info("[song-studio] signed in with the local identity");
-      } else {
-        console.info("[song-studio] local sign-in not available", {
-          reason: result.reason,
-        });
-      }
-    })
-    .finally(() => {
-      songStudioLocalSignInPending = null;
-    });
-  return songStudioLocalSignInPending;
+  return songStudioLocalSession.ensure(force);
 }
 
 interface DesktopCodeAgentMcpEnvironment {
   env: NodeJS.ProcessEnv;
-  remoteConfig:
-    | { state: "loaded"; serverCount: number }
-    | { state: "unavailable"; error: string };
+  notices: DesktopMcpNotice[];
 }
 
 async function desktopCodeAgentMcpEnvironment(
   cwd: string,
-  options: { includeWorkspaceApps?: boolean } = {},
+  options: {
+    includeWorkspaceApps?: boolean;
+    boundAppId?: string | undefined;
+  } = {},
 ): Promise<DesktopCodeAgentMcpEnvironment> {
   const workspaceRoot = resolveCodeAgentsTerminalCwd({});
   const workspaceConfig = loadMcpConfig(workspaceRoot);
@@ -5907,8 +5914,7 @@ async function desktopCodeAgentMcpEnvironment(
   };
   const allowlist = new Set(Object.keys(servers));
   const appIds: string[] = [];
-  const remoteConfig: DesktopCodeAgentMcpEnvironment["remoteConfig"] =
-    desktopRemoteMcpUnavailable();
+  const notices: DesktopMcpNotice[] = [];
 
   if (options.includeWorkspaceApps === false) {
     return {
@@ -5933,46 +5939,43 @@ async function desktopCodeAgentMcpEnvironment(
           "skills",
         ),
       },
-      remoteConfig,
+      notices,
     };
   }
 
+  const apps: DesktopWorkspaceApp[] = [];
   for (const appConfig of loadAppsForAuthContext()) {
     if (appConfig.enabled === false) continue;
     const baseUrl = resolveAppBaseUrl(appConfig);
-    if (!baseUrl) continue;
-    const serverId = desktopCodeAgentMcpServerId(appConfig.id);
-    const appMcpUrl = desktopAppMcpUrl(baseUrl);
-    const appSession = session.fromPartition(`persist:app-${appConfig.id}`);
-    const cookieHeader = await cookieHeaderForRelay(appSession, appMcpUrl);
-    if (appConfig.id === "song-studio") {
-      // Song Studio's MCP wants the connection entry from its own connect route,
-      // not the browser cookie. Fall back to the cookie if it cannot be minted.
-      await ensureSongStudioLocalSession();
-      const songCookies = await cookieHeaderForRelay(appSession, baseUrl);
-      const entry = await mintSongStudioMcpEntry(songCookies, baseUrl);
-      if (entry) {
-        servers[serverId] = {
-          ...entry,
-          description: `${appConfig.name} workspace app tools`,
-        };
-        allowlist.add(serverId);
-        appIds.push(appConfig.id);
-        continue;
-      }
-    } else if (!cookieHeader) {
-      // A hosted fogbreak.io app with no login has no tools to offer.
-      continue;
-    }
-    servers[serverId] = {
-      type: "http",
-      url: appMcpUrl,
-      ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : {}),
-      description: `${appConfig.name} workspace app tools`,
-    };
-    allowlist.add(serverId);
-    appIds.push(appConfig.id);
+    if (baseUrl) apps.push({ id: appConfig.id, name: appConfig.name, baseUrl });
   }
+  const resolved = await resolveWorkspaceAppMcpServers({
+    apps,
+    boundAppId: options.boundAppId,
+    serverIdFor: desktopCodeAgentMcpServerId,
+    mcpUrlFor: desktopAppMcpUrl,
+    readCookieHeader: (appId, mcpUrl) =>
+      cookieHeaderForRelay(
+        session.fromPartition(`persist:app-${appId}`),
+        mcpUrl,
+      ),
+    prepareSong: async (baseUrl) => {
+      await ensureSongStudioLocalSession();
+      return prepareSongStudioMcp({
+        readCookies: () => cookieHeaderForRelay(songStudioPartition(), baseUrl),
+        refreshCookies: async () => {
+          await ensureSongStudioLocalSession(true);
+          return cookieHeaderForRelay(songStudioPartition(), baseUrl);
+        },
+        songStudioUrl: baseUrl,
+        log: songStudioLog,
+      });
+    },
+  });
+  Object.assign(servers, resolved.servers);
+  for (const serverId of Object.keys(resolved.servers)) allowlist.add(serverId);
+  appIds.push(...resolved.appIds);
+  notices.push(...resolved.notices);
 
   return {
     env: {
@@ -5986,7 +5989,7 @@ async function desktopCodeAgentMcpEnvironment(
         "skills",
       ),
     },
-    remoteConfig,
+    notices,
   };
 }
 
@@ -6066,6 +6069,25 @@ function getCodeAgentChildEnvironment(
   const environment: NodeJS.ProcessEnv = {};
   for (const source of sources) Object.assign(environment, source);
   return withResolvedExecutablePaths(environment, LOCAL_CODE_AGENT_EXECUTABLES);
+}
+
+function releaseCodeAgentRunLeaseDirectly(
+  runId: string,
+  worktreeId: string,
+): void {
+  try {
+    releaseCodeAgentWorktree({
+      registryPath: codeAgentWorktreeRegistryFile(),
+      worktreeId,
+      runId,
+    });
+    void startNextQueuedCodeAgentWorktreeRun(worktreeId);
+  } catch (error) {
+    console.warn(
+      "[code-agents] could not release the worktree of a run stopped before it started:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 async function spawnCodeAgentRunner(
@@ -6183,19 +6205,29 @@ async function spawnCodeAgentRunner(
         error instanceof Error ? error.message : error,
       );
     });
-    const mcpEnvironment = await desktopCodeAgentMcpEnvironment(cwd, {
-      includeWorkspaceApps: true,
+    const prepared = await prepareRunMcp({
+      runMetadata: runRecord?.metadata,
+      readRecord: () => readCodeAgentRunRecord(runId),
+      build: (boundAppId) =>
+        desktopCodeAgentMcpEnvironment(cwd, {
+          includeWorkspaceApps: true,
+          boundAppId,
+        }),
+      announce: (message, metadata) =>
+        appendCodeAgentStatusEvent(runId, message, metadata),
+      release: (record) =>
+        releaseAbandonedRunStart({
+          runId,
+          worktreeId,
+          record,
+          startingRuns: startingCodeAgentRuns,
+          isTerminal: isTerminalCodeAgentRun,
+          reclaimTerminal: reclaimTerminalCodeAgentWorktree,
+          releaseLease: (id) => releaseCodeAgentRunLeaseDirectly(runId, id),
+        }),
     });
-    if (mcpEnvironment.remoteConfig.state === "unavailable") {
-      appendCodeAgentStatusEvent(
-        runId,
-        "Connected MCP settings could not be loaded for this chat.",
-        {
-          source: "desktop-mcp-config",
-          error: mcpEnvironment.remoteConfig.error,
-        },
-      );
-    }
+    if (prepared.state === "abandoned") return;
+    const mcpEnvironment = prepared.mcp;
     const computerEnv = desktopComputerChildEnv(
       runId,
       normalizedPermissionMode,
@@ -12042,19 +12074,15 @@ function readConfiguredCodexModel(): string | undefined {
 
 const localClaudeCliStatusCache = createCliStatusCache<LocalClaudeCliStatus>();
 
-function getLocalClaudeCliStatus(
-  options?: CliStatusReadOptions,
-): LocalClaudeCliStatus {
-  return cachedCliStatus(
+const localClaudeCliRunners = {
+  sync: (args: readonly string[]) => runCliSync("claude", [...args]),
+  async: (args: readonly string[]) => runCliAsync("claude", [...args]),
+};
+
+function getLocalClaudeCliStatus(): LocalClaudeCliStatus {
+  return cachedLocalClaudeCliStatus(
     localClaudeCliStatusCache,
-    () => readLocalClaudeCliStatus((args) => runCliSync("claude", [...args])),
-    () =>
-      readLocalClaudeCliStatusAsync((args) =>
-        runCliAsync("claude", [...args]),
-      ),
-    Date.now,
-    CLI_STATUS_TTL_MS,
-    options,
+    localClaudeCliRunners,
   );
 }
 
@@ -12271,7 +12299,11 @@ async function getCodeAgentModelList(
     const builderConfigured = Boolean(
       providerStatusById(settings, "builder")?.configured,
     );
-    const claude = getLocalClaudeCliStatus(cliStatusOptions);
+    const claude = await readLocalClaudeCliStatusFresh(
+      localClaudeCliStatusCache,
+      localClaudeCliRunners,
+      cliStatusOptions,
+    );
     logLocalCodeAgentRuntimes(claude, codex);
     const pi = getLocalCliAvailability(
       "pi",
